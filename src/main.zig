@@ -112,6 +112,28 @@ const NodeEnum = enum(u8) {
     entry_end,
 };
 
+const ArgTypeTag = enum(u8) {
+    int,
+    uint,
+    fd,
+    new_id,
+    object,
+    string,
+    fixed,
+    array,
+};
+
+const ArgType = union(ArgTypeTag) {
+    int: struct { @"enum": ?[]const u8 = null },
+    uint: struct { @"enum": ?[]const u8 = null },
+    fd: struct {},
+    new_id: struct { interface: ?[]const u8 = null },
+    object: struct { interface: ?[]const u8 = null, allow_null: bool = false },
+    string: struct { allow_null: bool = false },
+    fixed: struct {},
+    array: struct {},
+};
+
 const Node = union(NodeEnum) {
     protocol_begin: struct {
         name: []const u8 = "",
@@ -134,10 +156,8 @@ const Node = union(NodeEnum) {
     enum_end: struct {},
     arg_begin: struct {
         name: []const u8 = "",
-        type: []const u8 = "",
         summary: []const u8 = "",
-        @"enum": ?[]const u8 = null,
-        interface: ?[]const u8 = null,
+        type: ArgType = .{ .int = .{} },
     },
     entry_begin: struct {
         name: []const u8 = "",
@@ -163,12 +183,10 @@ const Node = union(NodeEnum) {
             .request_end => |_| try writer.print("</request>", .{}),
             .enum_begin => |n| try writer.print("<enum name=\"{s}\" bitfield={}>", .{ n.name, n.bitfield }),
             .enum_end => |_| try writer.print("</enum>", .{}),
-            .arg_begin => |n| try writer.print("<arg name=\"{s}\" type=\"{s}\" summary=\"{s}\" enum=\"{?s}\" interface=\"{?s}\">", .{
+            .arg_begin => |n| try writer.print("<arg name=\"{s}\" type=\"{s}\" summary=\"{s}\">", .{
                 n.name,
-                n.type,
+                @tagName(n.type),
                 n.summary,
-                n.@"enum",
-                n.interface,
             }),
             .arg_end => |_| try writer.print("</arg>", .{}),
             .entry_begin => |n| try writer.print("<entry name=\"{s}\" value={} summary=\"{s}\">", .{ n.name, n.value, n.summary }),
@@ -188,27 +206,7 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
 
         const tag = std.mem.span(cur_node.name);
 
-        if (std.mem.eql(u8, tag, "protocol")) {
-            try node_list.append(.{ .protocol_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "copyright")) {
-            try node_list.append(.{ .copyright_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "interface")) {
-            try node_list.append(.{ .interface_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "description")) {
-            try node_list.append(.{ .description_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "event")) {
-            try node_list.append(.{ .event_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "request")) {
-            try node_list.append(.{ .request_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "arg")) {
-            try node_list.append(.{ .arg_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "enum")) {
-            try node_list.append(.{ .enum_begin = .{} });
-        } else if (std.mem.eql(u8, tag, "entry")) {
-            try node_list.append(.{ .entry_begin = .{} });
-        } else {
-            std.debug.panic("Unexpected tag: {s}", .{tag});
-        }
+        try node_list.append(tagToOpening(tag));
 
         std.debug.assert(node_list.nodes.items.len > 0);
 
@@ -223,6 +221,25 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
             std.mem.copyForwards(u8, arena_attr_value, attr_value);
 
             switch (latest_node.*) {
+                .arg_begin => |*n| inline for (std.meta.fields(@TypeOf(n.*))) |field| {
+                    if (std.mem.eql(u8, field.name, attr_name)) {
+                        switch (@typeInfo(field.type)) {
+                            .Int => @field(n, field.name) = if (std.mem.startsWith(u8, arena_attr_value, "0x"))
+                                try std.fmt.parseInt(u32, arena_attr_value[2..], 16)
+                            else
+                                try std.fmt.parseInt(u32, arena_attr_value, 10),
+                            .Bool => @field(n, field.name) = std.mem.eql(u8, arena_attr_value, "true"),
+                            .Union => {
+                                inline for (std.meta.fields(ArgType)) |union_field| {
+                                    if (std.mem.eql(u8, union_field.name, attr_value)) {
+                                        @field(n, field.name) = @unionInit(ArgType, union_field.name, .{});
+                                    }
+                                }
+                            },
+                            else => @field(n, field.name) = arena_attr_value,
+                        }
+                    }
+                },
                 inline else => |*n| inline for (std.meta.fields(@TypeOf(n.*))) |field| {
                     if (std.mem.eql(u8, field.name, attr_name)) {
                         switch (@typeInfo(field.type)) {
@@ -242,26 +259,54 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
 
         try processNode(allocator, node_list, cur_node.children);
 
-        if (std.mem.eql(u8, tag, "protocol")) {
-            try node_list.append(.{ .protocol_end = .{} });
-        } else if (std.mem.eql(u8, tag, "copyright")) {
-            try node_list.append(.{ .copyright_end = .{} });
-        } else if (std.mem.eql(u8, tag, "interface")) {
-            try node_list.append(.{ .interface_end = .{} });
-        } else if (std.mem.eql(u8, tag, "description")) {
-            try node_list.append(.{ .description_end = .{} });
-        } else if (std.mem.eql(u8, tag, "event")) {
-            try node_list.append(.{ .event_end = .{} });
-        } else if (std.mem.eql(u8, tag, "request")) {
-            try node_list.append(.{ .request_end = .{} });
-        } else if (std.mem.eql(u8, tag, "enum")) {
-            try node_list.append(.{ .enum_end = .{} });
-        } else if (std.mem.eql(u8, tag, "arg")) {
-            try node_list.append(.{ .arg_end = .{} });
-        } else if (std.mem.eql(u8, tag, "entry")) {
-            try node_list.append(.{ .entry_end = .{} });
-        } else {
-            std.debug.panic("Unexpected tag: {s}", .{tag});
-        }
+        try node_list.append(tagToClosing(tag));
+    }
+}
+
+fn tagToOpening(tag: []const u8) Node {
+    if (std.mem.eql(u8, tag, "protocol")) {
+        return .{ .protocol_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "copyright")) {
+        return .{ .copyright_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "interface")) {
+        return .{ .interface_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "description")) {
+        return .{ .description_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "event")) {
+        return .{ .event_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "request")) {
+        return .{ .request_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "enum")) {
+        return .{ .enum_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "arg")) {
+        return .{ .arg_begin = .{} };
+    } else if (std.mem.eql(u8, tag, "entry")) {
+        return .{ .entry_begin = .{} };
+    } else {
+        std.debug.panic("Unexpected tag: {s}", .{tag});
+    }
+}
+
+fn tagToClosing(tag: []const u8) Node {
+    if (std.mem.eql(u8, tag, "protocol")) {
+        return .{ .protocol_end = .{} };
+    } else if (std.mem.eql(u8, tag, "copyright")) {
+        return .{ .copyright_end = .{} };
+    } else if (std.mem.eql(u8, tag, "interface")) {
+        return .{ .interface_end = .{} };
+    } else if (std.mem.eql(u8, tag, "description")) {
+        return .{ .description_end = .{} };
+    } else if (std.mem.eql(u8, tag, "event")) {
+        return .{ .event_end = .{} };
+    } else if (std.mem.eql(u8, tag, "request")) {
+        return .{ .request_end = .{} };
+    } else if (std.mem.eql(u8, tag, "enum")) {
+        return .{ .enum_end = .{} };
+    } else if (std.mem.eql(u8, tag, "arg")) {
+        return .{ .arg_end = .{} };
+    } else if (std.mem.eql(u8, tag, "entry")) {
+        return .{ .entry_end = .{} };
+    } else {
+        std.debug.panic("Unexpected tag: {s}", .{tag});
     }
 }
