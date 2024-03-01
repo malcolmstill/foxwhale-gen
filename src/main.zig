@@ -9,8 +9,8 @@ pub fn main() !void {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    var nodes = NodeList.init(arena);
-    defer nodes.deinit();
+    var node_list = NodeList.init(arena);
+    defer node_list.deinit();
 
     xml2.xmlInitParser();
     defer xml2.xmlCleanupParser();
@@ -21,10 +21,39 @@ pub fn main() !void {
 
     const root_element = xml2.xmlDocGetRootElement(doc);
 
-    try processNode(arena, &nodes, root_element);
+    try processNode(arena, &node_list, root_element);
 
-    std.debug.print("{any}", .{nodes});
+    std.debug.print("{s}", .{part_1});
+    for (node_list.nodes.items) |node| {
+        switch (node) {
+            .interface_begin => |i| std.debug.print("  {s}: type = ?void,\n", .{i.name}),
+            else => continue,
+        }
+    }
+    std.debug.print("{s}", .{part_2});
+    std.debug.print("{s}", .{part_3});
 }
+
+const part_1 =
+    \\const std = @import("std");
+    \\const builtin = @import("builtin");
+    \\const WireFn = @import("wire.zig").Wire;
+    \\
+    \\const fn Wayland(comptime ResourceMap: struct {
+    \\
+;
+const part_2 =
+    \\}) type {
+    \\  return struct {
+    \\    pub const Wire = WireFn(WlMessage);
+    \\
+;
+const part_3 =
+    \\  };
+    \\}
+    \\
+;
+// const walyand_struct = "const fn Wayland(comptime ResourceMap: struct {{ {s} }}) type {{ return struct {{ {s} }}; }}";
 
 const NodeList = struct {
     nodes: std.ArrayList(Node),
@@ -58,12 +87,6 @@ const NodeList = struct {
     }
 };
 
-const prelude =
-    \\const std = @import("std");
-    \\const builtin = @import("builtin");
-    \\const WireFn = @import("wire.zig").Wire;
-;
-
 fn isOpen(node: Node) bool {
     return switch (node) {
         .protocol_begin,
@@ -88,8 +111,6 @@ fn isOpen(node: Node) bool {
         => false,
     };
 }
-
-const walyand_struct = "const fn Wayland(comptime ResourceMap: struct {{ {s} }}) type {{ return struct {{ {s} }}; }}";
 
 const NodeEnum = enum(u8) {
     protocol_begin,
