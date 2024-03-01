@@ -1,7 +1,7 @@
 const std = @import("std");
 const xml2 = @cImport({
-    @cDefine("LIBXML_READER_ENABLED", {});
-    @cInclude("libxml/xmlreader.h");
+    @cInclude("libxml/parser.h");
+    @cInclude("libxml/tree.h");
 });
 
 pub fn main() !void {
@@ -12,18 +12,85 @@ pub fn main() !void {
     var nodes = NodeList.init(arena);
     defer nodes.deinit();
 
-    const reader = xml2.xmlReaderForFile("wayland.xml", null, 0) orelse return error.ReaderFailed;
-    defer xml2.xmlFreeTextReader(reader);
+    xml2.xmlInitParser();
+    defer xml2.xmlCleanupParser();
 
-    // Process the file
-    while (xml2.xmlTextReaderRead(reader) == 1) {
-        try processNode(arena, &nodes, reader);
-    }
+    // Parse the XML file
+    const doc = xml2.xmlReadFile("wayland.xml", null, 0) orelse return error.ReaderFailed;
+    defer xml2.xmlFreeDoc(doc);
 
-    // Cleanup function for the XML library
-    xml2.xmlCleanupParser();
+    const root_element = xml2.xmlDocGetRootElement(doc);
+
+    try processNode(arena, &nodes, root_element);
 
     std.debug.print("{any}", .{nodes});
+}
+
+fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, node: ?*xml2.xmlNode) !void {
+    var maybe_cur_node: ?*xml2.xmlNode = node;
+
+    while (maybe_cur_node) |n| {
+        const cur_node: *xml2.xmlNode = n;
+        defer maybe_cur_node = cur_node.*.next;
+
+        if (cur_node.type != xml2.XML_ELEMENT_NODE) continue;
+
+        const tag = std.mem.span(cur_node.name);
+
+        if (std.mem.eql(u8, tag, "protocol")) {
+            try node_list.append(.{ .protocol_begin = .{ .name = "" } });
+        } else if (std.mem.eql(u8, tag, "copyright")) {
+            try node_list.append(.{ .copyright_begin = .{} });
+        } else if (std.mem.eql(u8, tag, "interface")) {
+            try node_list.append(.{ .interface_begin = .{ .name = "" } });
+        } else if (std.mem.eql(u8, tag, "description")) {
+            try node_list.append(.{ .description_begin = .{ .summary = "" } });
+        } else if (std.mem.eql(u8, tag, "event")) {
+            try node_list.append(.{ .event_begin = .{ .name = "" } });
+        } else if (std.mem.eql(u8, tag, "request")) {
+            try node_list.append(.{ .request_begin = .{ .name = "" } });
+        } else if (std.mem.eql(u8, tag, "arg")) {
+            try node_list.append(.{ .arg_begin = .{} });
+        } else if (std.mem.eql(u8, tag, "enum")) {
+            try node_list.append(.{ .enum_begin = .{} });
+        } else if (std.mem.eql(u8, tag, "entry")) {
+            try node_list.append(.{ .entry_begin = .{} });
+        } else {
+            std.debug.panic("Unexpected tag: {s}", .{tag});
+        }
+
+        // var attr = cur_node.*.properties;
+        // while (attr != null) {
+        //     const attrName = std.mem.span(attr.name);
+        //     const attrValue = std.mem.span(attr.children.content);
+        //     std.debug.print("  Attribute: {s}={s}\n", .{ attrName, attrValue });
+        //     attr = attr.*.next;
+        // }
+
+        try processNode(allocator, node_list, cur_node.children);
+
+        if (std.mem.eql(u8, tag, "protocol")) {
+            try node_list.append(.{ .protocol_end = .{} });
+        } else if (std.mem.eql(u8, tag, "copyright")) {
+            try node_list.append(.{ .copyright_end = .{} });
+        } else if (std.mem.eql(u8, tag, "interface")) {
+            try node_list.append(.{ .interface_end = .{} });
+        } else if (std.mem.eql(u8, tag, "description")) {
+            try node_list.append(.{ .description_end = .{} });
+        } else if (std.mem.eql(u8, tag, "event")) {
+            try node_list.append(.{ .event_end = .{} });
+        } else if (std.mem.eql(u8, tag, "request")) {
+            try node_list.append(.{ .request_end = .{} });
+        } else if (std.mem.eql(u8, tag, "enum")) {
+            try node_list.append(.{ .enum_end = .{} });
+        } else if (std.mem.eql(u8, tag, "arg")) {
+            try node_list.append(.{ .arg_end = .{} });
+        } else if (std.mem.eql(u8, tag, "entry")) {
+            try node_list.append(.{ .entry_end = .{} });
+        } else {
+            std.debug.panic("Unexpected tag: {s}", .{tag});
+        }
+    }
 }
 
 const NodeList = struct {
@@ -45,15 +112,13 @@ const NodeList = struct {
         var indent: i32 = -1;
         for (node_list.nodes.items) |node| {
             const ind = getIndent(node);
-            if (ind == 0) indent += 1;
             if (ind > 0) indent += ind;
             defer {
                 if (ind < 0) indent += ind;
-                if (ind == 0) indent -= 1;
             }
 
             for (0..@intCast(indent)) |_| {
-                try writer.print("  ", .{});
+                try writer.print(" ", .{});
             }
 
             try writer.print("{any}\n", .{node});
@@ -76,6 +141,8 @@ fn getIndent(node: Node) i32 {
         .event_begin,
         .request_begin,
         .enum_begin,
+        .arg_begin,
+        .entry_begin,
         => 1,
         .protocol_end,
         .copyright_end,
@@ -84,10 +151,9 @@ fn getIndent(node: Node) i32 {
         .event_end,
         .request_end,
         .enum_end,
+        .arg_end,
+        .entry_end,
         => -1,
-        .arg,
-        .entry,
-        => 0,
     };
 }
 
@@ -108,8 +174,10 @@ const NodeEnum = enum(u8) {
     request_end,
     enum_begin,
     enum_end,
-    arg,
-    entry,
+    arg_begin,
+    entry_begin,
+    arg_end,
+    entry_end,
 };
 
 const Node = union(NodeEnum) {
@@ -132,8 +200,10 @@ const Node = union(NodeEnum) {
     request_end: struct {},
     enum_begin: struct {},
     enum_end: struct {},
-    arg: struct {},
-    entry: struct {},
+    arg_begin: struct {},
+    entry_begin: struct {},
+    arg_end: struct {},
+    entry_end: struct {},
 
     pub fn format(node: Node, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (node) {
@@ -151,13 +221,15 @@ const Node = union(NodeEnum) {
             .request_end => |_| try writer.print("</request>", .{}),
             .enum_begin => |_| try writer.print("<enum>", .{}),
             .enum_end => |_| try writer.print("</enum>", .{}),
-            .arg => |_| try writer.print("<arg>", .{}),
-            .entry => |_| try writer.print("<entry>", .{}),
+            .arg_begin => |_| try writer.print("<arg>", .{}),
+            .arg_end => |_| try writer.print("</arg>", .{}),
+            .entry_begin => |_| try writer.print("<entry>", .{}),
+            .entry_end => |_| try writer.print("</entry>", .{}),
         }
     }
 };
 
-fn processNode(allocator: std.mem.Allocator, nodes: *NodeList, reader: *xml2.xmlTextReader) !void {
+fn oldProcessNode(allocator: std.mem.Allocator, nodes: *NodeList, reader: *xml2.xmlTextReader) !void {
     const tag_ptr = xml2.xmlTextReaderConstName(reader);
     const tag = if (tag_ptr) |ptr| std.mem.span(ptr) else "";
 
