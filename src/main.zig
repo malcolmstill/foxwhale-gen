@@ -23,6 +23,8 @@ pub fn main() !void {
 
     try processNode(arena, &node_list, root_element);
 
+    std.debug.print("{any}\n", .{node_list});
+
     const wayland = try processProtocols(arena, &node_list);
 
     // std.debug.print("{any}\n", .{wayland});
@@ -37,22 +39,45 @@ pub fn main() !void {
 
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
-            std.debug.print("    pub const {s} = struct {{\n", .{try snakeToCamel(arena, interface.name)});
+            std.debug.print("    pub const {s} = struct {{\n", .{try dotToCaeml(arena, interface.name)});
             std.debug.print("      wire: *Wire,\n", .{});
             std.debug.print("      id: u32,\n", .{});
             std.debug.print("      version: u32,\n", .{});
             std.debug.print("      resource: ResourceMap.{s},\n", .{interface.name});
             std.debug.print("\n", .{});
-            std.debug.print("      const Self = @This();\n", .{});
+            std.debug.print("      const Self = @This();\n\n", .{});
 
             for (interface.events.items) |event| {
-                std.debug.print("      pub fn send{s}() !void {{\n", .{try snakeToCamel(arena, event.name)});
-                std.debug.print("      }}\n", .{});
+                std.debug.print("      pub fn send{s}(self: Self", .{try dotToCaeml(arena, event.name)});
+                for (event.args.items) |arg| {
+                    std.debug.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
+                }
+                std.debug.print(") !void {{\n", .{});
+                std.debug.print("        self.wire.startWrite();\n", .{});
+                std.debug.print("        self.wire.finishWrite(self.id);\n", .{});
+                std.debug.print("      }}\n\n", .{});
             }
+            std.debug.print("    }}\n\n", .{});
         }
     }
 
     std.debug.print("{s}", .{part_3});
+}
+
+pub fn dotToCaeml(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    const dot_count = std.mem.count(u8, input, ".");
+
+    if (dot_count == 0) {
+        return try snakeToCamel(allocator, input);
+    } else if (dot_count == 1) {
+        var it = std.mem.split(u8, input, ".");
+        const first = try snakeToCamel(allocator, it.next() orelse unreachable);
+        const second = try snakeToCamel(allocator, it.next() orelse unreachable);
+
+        return try std.mem.join(allocator, ".", &.{ first, second });
+    } else {
+        unreachable;
+    }
 }
 
 pub fn snakeToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
@@ -340,13 +365,32 @@ const ArgType = union(ArgTypeTag) {
     fixed: struct {},
     array: struct {},
 
+    pub fn zigType(arg_type: ArgType, allocator: std.mem.Allocator) ![]const u8 {
+        return switch (arg_type) {
+            .int => |o| if (o.@"enum") |e| try dotToCaeml(allocator, e) else "i32",
+            .uint => |o| if (o.@"enum") |e| try dotToCaeml(allocator, e) else "u32",
+            .fd => "i32",
+            .new_id => "u32",
+            .object => |o| if (o.interface) |i| try dotToCaeml(allocator, i) else "u32",
+            .string => "[]const u8",
+            .fixed => "f32",
+            .array => "[]u8",
+        };
+    }
+
     pub fn format(arg_type: ArgType, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (arg_type) {
             .int => try writer.print("int", .{}),
             .uint => try writer.print("uint", .{}),
             .fd => try writer.print("fd", .{}),
             .new_id => try writer.print("new_id", .{}),
-            .object => try writer.print("object", .{}),
+            .object => |o| {
+                try writer.print("object (allow-null = {}", .{o.allow_null});
+                if (o.interface) |i| {
+                    try writer.print("interface = {s}", .{i});
+                }
+                try writer.print(")", .{});
+            },
             .string => try writer.print("string", .{}),
             .fixed => try writer.print("fixed", .{}),
             .array => try writer.print("array", .{}),
@@ -403,9 +447,9 @@ const Node = union(NodeEnum) {
             .request_end => |_| try writer.print("</request>", .{}),
             .enum_begin => |n| try writer.print("<enum name=\"{s}\" bitfield={}>", .{ n.name, n.bitfield }),
             .enum_end => |_| try writer.print("</enum>", .{}),
-            .arg_begin => |n| try writer.print("<arg name=\"{s}\" type=\"{s}\" summary=\"{s}\">", .{
+            .arg_begin => |n| try writer.print("<arg name=\"{s}\" type=\"{any}\" summary=\"{s}\">", .{
                 n.name,
-                @tagName(n.type),
+                n.type,
                 n.summary,
             }),
             .arg_end => |_| try writer.print("</arg>", .{}),
@@ -441,22 +485,27 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
             std.mem.copyForwards(u8, arena_attr_value, attr_value);
 
             switch (latest_node.*) {
-                .arg_begin => |*n| inline for (std.meta.fields(@TypeOf(n.*))) |field| {
-                    if (std.mem.eql(u8, field.name, attr_name)) {
-                        switch (@typeInfo(field.type)) {
-                            .Int => @field(n, field.name) = if (std.mem.startsWith(u8, arena_attr_value, "0x"))
-                                try std.fmt.parseInt(u32, arena_attr_value[2..], 16)
-                            else
-                                try std.fmt.parseInt(u32, arena_attr_value, 10),
-                            .Bool => @field(n, field.name) = std.mem.eql(u8, arena_attr_value, "true"),
-                            .Union => {
-                                inline for (std.meta.fields(ArgType)) |union_field| {
-                                    if (std.mem.eql(u8, union_field.name, attr_value)) {
-                                        @field(n, field.name) = @unionInit(ArgType, union_field.name, .{});
+                .arg_begin => |*n| inline for (std.meta.fields(@TypeOf(n.*))) |_| {
+                    if (std.mem.eql(u8, attr_name, "name")) {
+                        n.name = attr_value;
+                    } else if (std.mem.eql(u8, attr_name, "summary")) {
+                        n.summary = attr_value;
+                    } else if (std.mem.eql(u8, attr_name, "type")) {
+                        inline for (std.meta.fields(ArgType)) |union_field| {
+                            if (std.mem.eql(u8, union_field.name, attr_value)) {
+                                n.type = @unionInit(ArgType, union_field.name, .{});
+                            }
+                        }
+                    } else {
+                        inline for (std.meta.fields(ArgType)) |union_field| {
+                            if (std.mem.eql(u8, union_field.name, @tagName(std.meta.activeTag(n.type)))) {
+                                inline for (std.meta.fields(union_field.type)) |union_specific_field| {
+                                    switch (@typeInfo(union_specific_field.type)) {
+                                        .Bool => @field(@field(n.type, union_field.name), union_specific_field.name) = std.mem.eql(u8, arena_attr_value, "true"),
+                                        else => @field(@field(n.type, union_field.name), union_specific_field.name) = arena_attr_value,
                                     }
                                 }
-                            },
-                            else => @field(n, field.name) = arena_attr_value,
+                            }
                         }
                     }
                 },
