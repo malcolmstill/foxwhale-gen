@@ -23,34 +23,180 @@ pub fn main() !void {
 
     try processNode(arena, &node_list, root_element);
 
-    std.debug.print("{s}", .{part_1});
-    for (node_list.nodes.items) |node| {
+    const wayland = try processProtocols(arena, &node_list);
+
+    std.debug.print("{any}\n", .{wayland});
+
+    // std.debug.print("{s}", .{part_1});
+    // for (node_list.nodes.items) |node| {
+    //     switch (node) {
+    //         .interface_begin => |i| std.debug.print("  {s}: type = ?void,\n", .{i.name}),
+    //         else => continue,
+    //     }
+    // }
+    // std.debug.print("{s}", .{part_2});
+
+    // for (node_list.nodes.items) |node| {
+    //     switch (node) {
+    //         .interface_begin => |i| {
+    //             std.debug.print("    pub const {s} = struct {{\n", .{i.name});
+    //             std.debug.print("      wire: *Wire,\n", .{});
+    //             std.debug.print("      id: u32,\n", .{});
+    //             std.debug.print("      version: u32,\n", .{});
+    //             std.debug.print("      resource: ResourceMap.{s},\n", .{i.name});
+    //             std.debug.print("\n", .{});
+    //             std.debug.print("      const Self = @This();\n", .{});
+    //         },
+    //         .interface_end => |_| std.debug.print("    }};\n", .{}),
+    //         .event_begin => |ev| std.debug.print("      pub fn send{s}() !void {{\n", .{ev.name}),
+    //         .event_end => |_| std.debug.print("      }}\n", .{}),
+    //         else => continue,
+    //     }
+    // }
+
+    // std.debug.print("{s}", .{part_3});
+}
+
+fn processProtocols(allocator: std.mem.Allocator, node_list: *NodeList) !Wayland {
+    var wayland = Wayland.init(allocator);
+
+    var i: usize = 0;
+    var start: usize = 0;
+    var protocol_name: []const u8 = "";
+    const nodes = node_list.nodes.items;
+    for (nodes) |node| {
+        defer i += 1;
         switch (node) {
-            .interface_begin => |i| std.debug.print("  {s}: type = ?void,\n", .{i.name}),
+            .protocol_begin => |p| {
+                protocol_name = p.name;
+                start = i;
+            },
+            .protocol_end => {
+                const protocol = try processProtocol(allocator, nodes[start..i], protocol_name);
+                try wayland.protocols.append(protocol);
+            },
             else => continue,
         }
     }
-    std.debug.print("{s}", .{part_2});
 
-    for (node_list.nodes.items) |node| {
+    return wayland;
+}
+
+fn processProtocol(allocator: std.mem.Allocator, nodes: []Node, name: []const u8) !Protocol {
+    var protocol = Protocol.init(allocator, name);
+
+    var index: usize = 0;
+    var start: usize = 0;
+    var interface_name: []const u8 = "";
+    for (nodes) |node| {
+        defer index += 1;
         switch (node) {
             .interface_begin => |i| {
-                std.debug.print("    pub const {s} = struct {{\n", .{i.name});
-                std.debug.print("      wire: *Wire,\n", .{});
-                std.debug.print("      id: u32,\n", .{});
-                std.debug.print("      version: u32,\n", .{});
-                std.debug.print("      resource: ResourceMap.{s},\n", .{i.name});
-                std.debug.print("\n", .{});
-                std.debug.print("      const Self = @This();\n", .{});
+                interface_name = i.name;
+                start = index;
             },
-            .interface_end => |_| std.debug.print("    }};\n", .{}),
-            .event_begin => |ev| std.debug.print("      pub fn send{s}() !void {{\n", .{ev.name}),
-            .event_end => |_| std.debug.print("      }}\n", .{}),
+            .interface_end => {
+                const interface = try processInterface(allocator, nodes[start..index], interface_name);
+                try protocol.interfaces.append(interface);
+            },
             else => continue,
         }
     }
 
-    std.debug.print("{s}", .{part_3});
+    return protocol;
+}
+
+fn processInterface(allocator: std.mem.Allocator, nodes: []Node, interface_name: []const u8) !Interface {
+    var interface = Interface.init(allocator, interface_name);
+
+    var index: usize = 0;
+    var start: usize = 0;
+    var name: []const u8 = "";
+    for (nodes) |node| {
+        defer index += 1;
+        switch (node) {
+            .enum_begin => |_| start = index,
+            .enum_end => {
+                const e_begin = nodes[start].enum_begin;
+                const @"enum" = try processEnum(allocator, nodes[start..index], e_begin.name, e_begin.bitfield);
+                try interface.enums.append(@"enum");
+            },
+            .request_begin => |r| {
+                name = r.name;
+                start = index;
+            },
+            .request_end => {
+                const request = try processRequest(allocator, nodes[start..index], name);
+                try interface.requests.append(request);
+            },
+            .event_begin => |e| {
+                name = e.name;
+                start = index;
+            },
+            .event_end => {
+                const event = try processEvent(allocator, nodes[start..index], name);
+                try interface.events.append(event);
+            },
+            else => continue,
+        }
+    }
+
+    return interface;
+}
+
+fn processRequest(allocator: std.mem.Allocator, nodes: []Node, request_name: []const u8) !Request {
+    var request = Request.init(allocator, request_name);
+
+    var index: usize = 0;
+    for (nodes) |node| {
+        defer index += 1;
+        switch (node) {
+            .arg_begin => |a| {
+                const arg: Arg = .{ .name = a.name, .type = a.type };
+                try request.args.append(arg);
+            },
+            else => continue,
+        }
+    }
+
+    return request;
+}
+
+fn processEvent(allocator: std.mem.Allocator, nodes: []Node, event_name: []const u8) !Event {
+    var event = Event.init(allocator, event_name);
+
+    var index: usize = 0;
+    for (nodes) |node| {
+        defer index += 1;
+        switch (node) {
+            .arg_begin => |a| {
+                const arg: Arg = .{ .name = a.name, .type = a.type };
+                try event.args.append(arg);
+            },
+            else => continue,
+        }
+    }
+
+    return event;
+}
+
+fn processEnum(allocator: std.mem.Allocator, nodes: []Node, enum_name: []const u8, bitmap: bool) !Enum {
+    var @"enum" = Enum.init(allocator, enum_name, bitmap);
+
+    var index: usize = 0;
+    for (nodes) |node| {
+        defer index += 1;
+        switch (node) {
+            .entry_begin => |e| {
+                const entry: Entry = .{ .name = e.name, .value = e.value };
+                try @"enum".entries.append(entry);
+            },
+            .entry_end => {},
+            else => continue,
+        }
+    }
+
+    return @"enum";
 }
 
 const part_1 =
@@ -172,6 +318,19 @@ const ArgType = union(ArgTypeTag) {
     string: struct { allow_null: bool = false },
     fixed: struct {},
     array: struct {},
+
+    pub fn format(arg_type: ArgType, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (arg_type) {
+            .int => try writer.print("int", .{}),
+            .uint => try writer.print("uint", .{}),
+            .fd => try writer.print("fd", .{}),
+            .new_id => try writer.print("new_id", .{}),
+            .object => try writer.print("object", .{}),
+            .string => try writer.print("string", .{}),
+            .fixed => try writer.print("fixed", .{}),
+            .array => try writer.print("array", .{}),
+        }
+    }
 };
 
 const Node = union(NodeEnum) {
@@ -350,3 +509,139 @@ fn tagToClosing(tag: []const u8) Node {
         std.debug.panic("Unexpected tag: {s}", .{tag});
     }
 }
+
+const Wayland = struct {
+    protocols: std.ArrayList(Protocol),
+
+    pub fn init(allocator: std.mem.Allocator) Wayland {
+        return .{ .protocols = std.ArrayList(Protocol).init(allocator) };
+    }
+
+    pub fn format(wayland: Wayland, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (wayland.protocols.items) |protocol| {
+            try writer.print("{any}\n", .{protocol});
+        }
+    }
+};
+
+const Protocol = struct {
+    name: []const u8,
+    interfaces: std.ArrayList(Interface),
+
+    pub fn init(allocator: std.mem.Allocator, name: []const u8) Protocol {
+        return .{ .name = name, .interfaces = std.ArrayList(Interface).init(allocator) };
+    }
+
+    pub fn format(protocol: Protocol, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("protocol \"{s}\":\n", .{protocol.name});
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{any}\n", .{interface});
+        }
+    }
+};
+
+const Interface = struct {
+    name: []const u8,
+    enums: std.ArrayList(Enum),
+    requests: std.ArrayList(Request),
+    events: std.ArrayList(Event),
+
+    pub fn init(allocator: std.mem.Allocator, name: []const u8) Interface {
+        return .{
+            .name = name,
+            .enums = std.ArrayList(Enum).init(allocator),
+            .requests = std.ArrayList(Request).init(allocator),
+            .events = std.ArrayList(Event).init(allocator),
+        };
+    }
+
+    pub fn format(interface: Interface, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("  interface \"{s}\":\n", .{interface.name});
+        for (interface.enums.items) |@"enum"| {
+            try writer.print("{any}\n", .{@"enum"});
+        }
+        for (interface.requests.items) |request| {
+            try writer.print("{any}\n", .{request});
+        }
+        for (interface.events.items) |event| {
+            try writer.print("{any}\n", .{event});
+        }
+    }
+};
+
+const Request = struct {
+    name: []const u8,
+    args: std.ArrayList(Arg),
+
+    pub fn init(allocator: std.mem.Allocator, name: []const u8) Request {
+        return .{
+            .name = name,
+            .args = std.ArrayList(Arg).init(allocator),
+        };
+    }
+
+    pub fn format(request: Request, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("    request \"{s}\":\n", .{request.name});
+        for (request.args.items) |arg| {
+            try writer.print("{any}\n", .{arg});
+        }
+    }
+};
+
+const Event = struct {
+    name: []const u8,
+    args: std.ArrayList(Arg),
+
+    pub fn init(allocator: std.mem.Allocator, name: []const u8) Event {
+        return .{
+            .name = name,
+            .args = std.ArrayList(Arg).init(allocator),
+        };
+    }
+
+    pub fn format(event: Event, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("    event \"{s}\":\n", .{event.name});
+        for (event.args.items) |arg| {
+            try writer.print("{any}\n", .{arg});
+        }
+    }
+};
+
+const Enum = struct {
+    name: []const u8,
+    bitmap: bool,
+    entries: std.ArrayList(Entry),
+
+    pub fn init(allocator: std.mem.Allocator, name: []const u8, bitmap: bool) Enum {
+        return .{
+            .name = name,
+            .bitmap = bitmap,
+            .entries = std.ArrayList(Entry).init(allocator),
+        };
+    }
+
+    pub fn format(@"enum": Enum, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("    enum {s}:\n", .{@"enum".name});
+        for (@"enum".entries.items) |entry| {
+            try writer.print("{any}\n", .{entry});
+        }
+    }
+};
+
+const Arg = struct {
+    name: []const u8,
+    type: ArgType,
+
+    pub fn format(arg: Arg, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("      arg \"{s}\" {any}", .{ arg.name, arg.type });
+    }
+};
+
+const Entry = struct {
+    name: []const u8,
+    value: u32,
+
+    pub fn format(entry: Entry, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("      entry \"{s}\" {}", .{ entry.name, entry.value });
+    }
+};
