@@ -31,6 +31,25 @@ pub fn main() !void {
         }
     }
     std.debug.print("{s}", .{part_2});
+
+    for (node_list.nodes.items) |node| {
+        switch (node) {
+            .interface_begin => |i| {
+                std.debug.print("    pub const {s} = struct {{\n", .{i.name});
+                std.debug.print("      wire: *Wire,\n", .{});
+                std.debug.print("      id: u32,\n", .{});
+                std.debug.print("      version: u32,\n", .{});
+                std.debug.print("      resource: ResourceMap.{s},\n", .{i.name});
+                std.debug.print("\n", .{});
+                std.debug.print("      const Self = @This();\n", .{});
+            },
+            .interface_end => |_| std.debug.print("    }};\n", .{}),
+            .event_begin => |ev| std.debug.print("      pub fn send{s}() !void {{\n", .{ev.name}),
+            .event_end => |_| std.debug.print("      }}\n", .{}),
+            else => continue,
+        }
+    }
+
     std.debug.print("{s}", .{part_3});
 }
 
