@@ -25,36 +25,34 @@ pub fn main() !void {
 
     const wayland = try processProtocols(arena, &node_list);
 
-    std.debug.print("{any}\n", .{wayland});
+    // std.debug.print("{any}\n", .{wayland});
 
-    // std.debug.print("{s}", .{part_1});
-    // for (node_list.nodes.items) |node| {
-    //     switch (node) {
-    //         .interface_begin => |i| std.debug.print("  {s}: type = ?void,\n", .{i.name}),
-    //         else => continue,
-    //     }
-    // }
-    // std.debug.print("{s}", .{part_2});
+    std.debug.print("{s}", .{part_1});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            std.debug.print("  {s}: type = ?void,\n", .{interface.name});
+        }
+    }
+    std.debug.print("{s}", .{part_2});
 
-    // for (node_list.nodes.items) |node| {
-    //     switch (node) {
-    //         .interface_begin => |i| {
-    //             std.debug.print("    pub const {s} = struct {{\n", .{i.name});
-    //             std.debug.print("      wire: *Wire,\n", .{});
-    //             std.debug.print("      id: u32,\n", .{});
-    //             std.debug.print("      version: u32,\n", .{});
-    //             std.debug.print("      resource: ResourceMap.{s},\n", .{i.name});
-    //             std.debug.print("\n", .{});
-    //             std.debug.print("      const Self = @This();\n", .{});
-    //         },
-    //         .interface_end => |_| std.debug.print("    }};\n", .{}),
-    //         .event_begin => |ev| std.debug.print("      pub fn send{s}() !void {{\n", .{ev.name}),
-    //         .event_end => |_| std.debug.print("      }}\n", .{}),
-    //         else => continue,
-    //     }
-    // }
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            std.debug.print("    pub const {s} = struct {{\n", .{interface.name});
+            std.debug.print("      wire: *Wire,\n", .{});
+            std.debug.print("      id: u32,\n", .{});
+            std.debug.print("      version: u32,\n", .{});
+            std.debug.print("      resource: ResourceMap.{s},\n", .{interface.name});
+            std.debug.print("\n", .{});
+            std.debug.print("      const Self = @This();\n", .{});
 
-    // std.debug.print("{s}", .{part_3});
+            for (interface.events.items) |event| {
+                std.debug.print("      pub fn send{s}() !void {{\n", .{event.name});
+                std.debug.print("      }}\n", .{});
+            }
+        }
+    }
+
+    std.debug.print("{s}", .{part_3});
 }
 
 fn processProtocols(allocator: std.mem.Allocator, node_list: *NodeList) !Wayland {
@@ -529,7 +527,10 @@ const Protocol = struct {
     interfaces: std.ArrayList(Interface),
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8) Protocol {
-        return .{ .name = name, .interfaces = std.ArrayList(Interface).init(allocator) };
+        return .{
+            .name = name,
+            .interfaces = std.ArrayList(Interface).init(allocator),
+        };
     }
 
     pub fn format(protocol: Protocol, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
