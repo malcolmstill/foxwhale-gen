@@ -37,7 +37,7 @@ pub fn main() !void {
 
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
-            std.debug.print("    pub const {s} = struct {{\n", .{interface.name});
+            std.debug.print("    pub const {s} = struct {{\n", .{try snakeToCamel(arena, interface.name)});
             std.debug.print("      wire: *Wire,\n", .{});
             std.debug.print("      id: u32,\n", .{});
             std.debug.print("      version: u32,\n", .{});
@@ -46,13 +46,36 @@ pub fn main() !void {
             std.debug.print("      const Self = @This();\n", .{});
 
             for (interface.events.items) |event| {
-                std.debug.print("      pub fn send{s}() !void {{\n", .{event.name});
+                std.debug.print("      pub fn send{s}() !void {{\n", .{try snakeToCamel(arena, event.name)});
                 std.debug.print("      }}\n", .{});
             }
         }
     }
 
     std.debug.print("{s}", .{part_3});
+}
+
+pub fn snakeToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    var it = std.mem.split(u8, input, "_");
+
+    var underscore_count: usize = 0;
+    for (input) |c| {
+        if (c != '_') continue;
+
+        underscore_count += 1;
+    }
+
+    var out = try allocator.alloc(u8, input.len - underscore_count);
+
+    var index: usize = 0;
+    while (it.next()) |part| {
+        defer index += part.len;
+
+        std.mem.copyForwards(u8, out[index .. index + part.len], part);
+        out[index] -= 32;
+    }
+
+    return out;
 }
 
 fn processProtocols(allocator: std.mem.Allocator, node_list: *NodeList) !Wayland {
