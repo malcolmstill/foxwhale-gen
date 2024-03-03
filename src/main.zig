@@ -64,6 +64,7 @@ pub fn main() !void {
             // Requests
             // ============================================
             try writer.print("      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
+            try writer.print("        use(self, Client, objects, field);\n", .{});
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
                 try writer.print("          {} => {{\n", .{request.index});
@@ -99,12 +100,12 @@ pub fn main() !void {
             }
             try writer.print("      }};\n\n", .{});
 
-            for (interface.requests.items) |r| {
-                const request: Request = r;
-
+            for (interface.requests.items) |request| {
                 try writer.print("      const {s}Message = struct {{\n", .{try snakeToCamel(arena, request.name)});
+                try writer.print("        {s}: {s},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
                 for (request.args.items) |arg| {
-                    try writer.print("        {s}: {s},\n", .{ arg.name, arg.name }); // FIXME: look up types
+                    // try writer.print("        {s}: {s},\n", .{ arg.name, arg.name }); // FIXME: look up types
+                    try arg.genMessageType(arena, writer);
                 }
                 try writer.print("      }};\n\n", .{});
             }
@@ -132,6 +133,13 @@ pub fn main() !void {
     }
 
     try writer.print("{s}", .{part_3});
+
+    try writer.print("fn use(self: anytype, client: anytype, objects: anytype, field: anytype) void {{", .{});
+    try writer.print("_ = self;", .{});
+    try writer.print("_ = client;", .{});
+    try writer.print("_ = objects;", .{});
+    try writer.print("_ = field;", .{});
+    try writer.print("}}", .{});
 }
 
 pub fn dotToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
@@ -450,6 +458,37 @@ const ArgType = union(ArgTypeTag) {
             .fixed => "f32",
             .array => "[]u8",
         };
+    }
+
+    pub fn genMessageType(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8) !void {
+        switch (arg_type) {
+            .int => |o| if (o.@"enum") |_| {
+                try writer.print("{s}: i32,\n", .{name});
+            } else {
+                try writer.print("{s}: i32,\n", .{name});
+            },
+            .uint => |o| if (o.@"enum") |_| {
+                try writer.print("{s}: u32,\n", .{name});
+            } else {
+                try writer.print("{s}: u32,\n", .{name});
+            },
+            .fd => try writer.print("{s}: i32,\n", .{name}),
+            .new_id => try writer.print("{s}: u32,\n", .{name}),
+            .object => |o| {
+                if (o.interface) |iface| {
+                    if (o.@"allow-null" == false) {
+                        try writer.print("{s}: {s},\n", .{ name, try snakeToCamel(allocator, iface) });
+                    } else {
+                        try writer.print("{s}: ?{s},\n", .{ name, try snakeToCamel(allocator, iface) });
+                    }
+                } else {
+                    try writer.print("{s}: u32,\n", .{name});
+                }
+            },
+            .string => try writer.print("{s}: []const u8,\n", .{name}),
+            .fixed => try writer.print("{s}: f32,\n", .{name}),
+            .array => try writer.print("{s}: []u8,\n", .{name}),
+        }
     }
 
     pub fn genNext(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8) !void {
@@ -850,6 +889,10 @@ const Enum = struct {
 const Arg = struct {
     name: []const u8,
     type: ArgType,
+
+    pub fn genMessageType(arg: Arg, allocator: std.mem.Allocator, writer: anytype) !void {
+        try arg.type.genMessageType(allocator, writer, arg.name);
+    }
 
     pub fn genNext(arg: Arg, allocator: std.mem.Allocator, writer: anytype) !void {
         try arg.type.genNext(allocator, writer, arg.name);
