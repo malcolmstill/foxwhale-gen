@@ -356,7 +356,7 @@ fn processRequest(allocator: std.mem.Allocator, nodes: []Node, request_name: []c
                 }
             },
             .arg_begin => |a| {
-                const arg: Arg = .{ .name = a.name, .type = a.type };
+                const arg: Arg = .{ .name = a.name, .type = a.type, .summary = a.summary };
                 try request.args.append(arg);
             },
             else => continue,
