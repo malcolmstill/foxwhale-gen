@@ -42,53 +42,6 @@ pub fn main() !void {
     }
     try writer.print("{s}", .{part_2});
 
-    try writer.print("pub const WlInterfaceType = enum(u8) {{\n", .{});
-    for (wayland.protocols.items) |protocol| {
-        for (protocol.interfaces.items) |interface| {
-            try writer.print("{s},\n", .{interface.name});
-        }
-    }
-    try writer.print("}};\n\n", .{});
-
-    try writer.print("pub const WlMessage = union(WlInterfaceType) {{\n", .{});
-    for (wayland.protocols.items) |protocol| {
-        for (protocol.interfaces.items) |interface| {
-            try writer.print("{s}: {s}.Message,\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
-        }
-    }
-    try writer.print("}};\n\n", .{});
-
-    try writer.print("pub const WlObject = union(WlInterfaceType) {{\n", .{});
-    for (wayland.protocols.items) |protocol| {
-        for (protocol.interfaces.items) |interface| {
-            try writer.print("{s}: {s},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
-        }
-    }
-
-    // fn readMessage
-    try writer.print("\npub fn readMessage(self: *WlObject, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !WlMessage {{\n", .{});
-    try writer.print("return switch (self.*) {{\n", .{});
-    for (wayland.protocols.items) |protocol| {
-        for (protocol.interfaces.items) |interface| {
-            try writer.print(".{s} => |*o| WlMessage {{ .{s} = try o.readMessage(Client, objects, field, opcode) }},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
-        }
-    }
-    try writer.print("}};\n\n", .{});
-    try writer.print("}}\n\n", .{});
-
-    // fn id
-    try writer.print("\npub fn id(self: WlObject) u32 {{\n", .{});
-    try writer.print("return switch (self) {{\n", .{});
-    for (wayland.protocols.items) |protocol| {
-        for (protocol.interfaces.items) |interface| {
-            try writer.print(".{s} => |o| o.id,\n", .{interface.name});
-        }
-    }
-    try writer.print("}};\n\n", .{});
-    try writer.print("}}\n\n", .{});
-
-    try writer.print("}};\n\n", .{});
-
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
             try writer.print("    pub const {s} = struct {{\n", .{try dotToCamel(arena, interface.name)});
@@ -162,7 +115,6 @@ pub fn main() !void {
                 try writer.print("      const {s}Message = struct {{\n", .{try snakeToCamel(arena, request.name)});
                 try writer.print("        {s}: {s},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
                 for (request.args.items) |arg| {
-                    // try writer.print("        {s}: {s},\n", .{ arg.name, arg.name }); // FIXME: look up types
                     try arg.genMessageType(arena, writer);
                 }
                 try writer.print("      }};\n\n", .{});
@@ -172,6 +124,7 @@ pub fn main() !void {
             // ============================================
             for (interface.events.items) |event| {
                 // FIXME: emit doc
+                try emitDoc(writer, event.description);
                 try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
                     try writer.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
@@ -190,6 +143,53 @@ pub fn main() !void {
             try writer.print("    }};\n\n", .{});
         }
     }
+
+    try writer.print("pub const WlInterfaceType = enum(u8) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{s},\n", .{interface.name});
+        }
+    }
+    try writer.print("}};\n\n", .{});
+
+    try writer.print("pub const WlMessage = union(WlInterfaceType) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{s}: {s}.Message,\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+        }
+    }
+    try writer.print("}};\n\n", .{});
+
+    try writer.print("pub const WlObject = union(WlInterfaceType) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{s}: {s},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+        }
+    }
+
+    // fn readMessage
+    try writer.print("\npub fn readMessage(self: *WlObject, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !WlMessage {{\n", .{});
+    try writer.print("return switch (self.*) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print(".{s} => |*o| WlMessage {{ .{s} = try o.readMessage(Client, objects, field, opcode) }},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+        }
+    }
+    try writer.print("}};\n\n", .{});
+    try writer.print("}}\n\n", .{});
+
+    // fn id
+    try writer.print("\npub fn id(self: WlObject) u32 {{\n", .{});
+    try writer.print("return switch (self) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print(".{s} => |o| o.id,\n", .{interface.name});
+        }
+    }
+    try writer.print("}};\n\n", .{});
+    try writer.print("}}\n\n", .{});
+
+    try writer.print("}};\n\n", .{});
 
     try writer.print("{s}", .{part_3});
 
@@ -356,6 +356,7 @@ fn processEvent(allocator: std.mem.Allocator, nodes: []Node, event_name: []const
     for (nodes) |node| {
         defer index += 1;
         switch (node) {
+            .description_begin => |d| event.description = d.description,
             .arg_begin => |a| {
                 const arg: Arg = .{ .name = a.name, .type = a.type };
                 try event.args.append(arg);
@@ -637,7 +638,7 @@ const Node = union(NodeEnum) {
         version: u32 = 0,
     },
     interface_end: struct {},
-    description_begin: struct { summary: []const u8 = "" },
+    description_begin: struct { summary: []const u8 = "", description: []const u8 = "" },
     description_end: struct {},
     event_begin: struct { name: []const u8 = "", since: u32 = 0 },
     event_end: struct {},
@@ -702,6 +703,11 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
         std.debug.assert(node_list.nodes.items.len > 0);
 
         const latest_node = &node_list.nodes.items[node_list.nodes.items.len - 1];
+
+        if (std.mem.eql(u8, tag, "description")) {
+            const content = std.mem.span(xml2.xmlNodeGetContent(cur_node));
+            latest_node.description_begin.description = content;
+        }
 
         var attr = cur_node.*.properties;
         while (attr != null) {
@@ -894,6 +900,7 @@ const Request = struct {
 
 const Event = struct {
     name: []const u8,
+    description: []const u8 = "",
     index: usize,
     args: std.ArrayList(Arg),
 
@@ -982,3 +989,10 @@ const Entry = struct {
         try writer.print("      entry \"{s}\" {}", .{ entry.name, entry.value });
     }
 };
+
+fn emitDoc(writer: anytype, doc: []const u8) !void {
+    var it = std.mem.split(u8, doc, "\n");
+    while (it.next()) |line| {
+        try writer.print("/// {s}\n", .{std.mem.trim(u8, line, " \t")});
+    }
+}
