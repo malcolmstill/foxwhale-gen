@@ -42,6 +42,53 @@ pub fn main() !void {
     }
     try writer.print("{s}", .{part_2});
 
+    try writer.print("pub const WlInterfaceType = enum(u8) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{s},\n", .{interface.name});
+        }
+    }
+    try writer.print("}};\n\n", .{});
+
+    try writer.print("pub const WlMessage = union(WlInterfaceType) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{s}: {s}.Message,\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+        }
+    }
+    try writer.print("}};\n\n", .{});
+
+    try writer.print("pub const WlObject = union(WlInterfaceType) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print("{s}: {s},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+        }
+    }
+
+    // fn readMessage
+    try writer.print("\npub fn readMessage(self: *WlObject, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !WlMessage {{\n", .{});
+    try writer.print("return switch (self.*) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print(".{s} => |*o| WlMessage {{ .{s} = try o.readMessage(Client, objects, field, opcode) }},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+        }
+    }
+    try writer.print("}};\n\n", .{});
+    try writer.print("}}\n\n", .{});
+
+    // fn id
+    try writer.print("\npub fn id(self: WlObject) u32 {{\n", .{});
+    try writer.print("return switch (self) {{\n", .{});
+    for (wayland.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            try writer.print(".{s} => |o| o.id,\n", .{interface.name});
+        }
+    }
+    try writer.print("}};\n\n", .{});
+    try writer.print("}}\n\n", .{});
+
+    try writer.print("}};\n\n", .{});
+
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
             try writer.print("    pub const {s} = struct {{\n", .{try dotToCamel(arena, interface.name)});
