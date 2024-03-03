@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const libxml2 = b.dependency("libxml2", .{ .target = target, .optimize = optimize, .iconv = false });
 
     const exe = b.addExecutable(.{
-        .name = "xml-user",
+        .name = "foxwhale-gen",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,

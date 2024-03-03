@@ -912,14 +912,14 @@ const Enum = struct {
             try writer.print("      pub const {s} = packed struct(u32) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
             for (@"enum".entries.items) |entry| {
                 if (entry.value == 0) continue;
-                try writer.print("        {s}: bool = false,\n", .{entry.name});
+                try writer.print("        @\"{s}\": bool = false,\n", .{entry.name});
             }
             try writer.print("        _padding: u{} = 0,\n", .{32 - count});
             try writer.print("      }};\n\n", .{});
         } else {
             try writer.print("      pub const {s} = enum(u8) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
             for (@"enum".entries.items) |entry| {
-                try writer.print("        {s} = {},\n", .{ entry.name, entry.value });
+                try writer.print("        @\"{s}\" = {},\n", .{ entry.name, entry.value });
             }
             try writer.print("      }};\n\n", .{});
         }
