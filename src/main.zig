@@ -456,7 +456,11 @@ const ArgType = union(ArgTypeTag) {
             .new_id => try writer.print("const {s} = try self.wire.nextU32();\n", .{name}),
             .object => |o| {
                 if (o.interface) |iface| {
-                    try writer.print("const {s}: {s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
+                    if (o.allow_null) {
+                        try writer.print("const {s}: {s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
+                    } else {
+                        try writer.print("const {s}: ?{s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
+                    }
                 } else {
                     try writer.print("const {s} = try self.wire.nextU32();\n", .{name}); // TODO: We can make send args typesafe
                 }
