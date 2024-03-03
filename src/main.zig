@@ -9,6 +9,8 @@ pub fn main() !void {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
+    // const args = try std.process.argsAlloc(arena);
+
     var node_list = NodeList.init(arena);
     defer node_list.deinit();
 
@@ -23,48 +25,58 @@ pub fn main() !void {
 
     try processNode(arena, &node_list, root_element);
 
-    std.debug.print("{any}\n", .{node_list});
-
     const wayland = try processProtocols(arena, &node_list);
 
-    // std.debug.print("{any}\n", .{wayland});
+    // const outfile = try std.fs.cwd().createFile(output, .{});
+    // defer outfile.close();
 
-    std.debug.print("{s}", .{part_1});
+    var writer = std.io.getStdOut().writer();
+
+    // const output: []const u8 = args[1];
+
+    try writer.print("{s}", .{part_1});
+    try writer.print("{s}", .{part_1});
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
-            std.debug.print("  {s}: type = ?void,\n", .{interface.name});
+            try writer.print("  {s}: type = ?void,\n", .{interface.name});
         }
     }
-    std.debug.print("{s}", .{part_2});
+    try writer.print("{s}", .{part_2});
 
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
-            std.debug.print("    pub const {s} = struct {{\n", .{try dotToCaeml(arena, interface.name)});
-            std.debug.print("      wire: *Wire,\n", .{});
-            std.debug.print("      id: u32,\n", .{});
-            std.debug.print("      version: u32,\n", .{});
-            std.debug.print("      resource: ResourceMap.{s},\n", .{interface.name});
-            std.debug.print("\n", .{});
-            std.debug.print("      const Self = @This();\n\n", .{});
+            try writer.print("    pub const {s} = struct {{\n", .{try dotToCamel(arena, interface.name)});
+            try writer.print("      wire: *Wire,\n", .{});
+            try writer.print("      id: u32,\n", .{});
+            try writer.print("      version: u32,\n", .{});
+            try writer.print("      resource: ResourceMap.{s},\n", .{interface.name});
+            try writer.print("\n", .{});
+            try writer.print("      const Self = @This();\n\n", .{});
 
             for (interface.events.items) |event| {
-                std.debug.print("      pub fn send{s}(self: Self", .{try dotToCaeml(arena, event.name)});
+                try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
-                    std.debug.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
+                    try writer.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
                 }
-                std.debug.print(") !void {{\n", .{});
-                std.debug.print("        self.wire.startWrite();\n", .{});
-                std.debug.print("        self.wire.finishWrite(self.id);\n", .{});
-                std.debug.print("      }}\n\n", .{});
+                try writer.print(") !void {{\n", .{});
+                try writer.print("        self.wire.startWrite();\n", .{});
+
+                for (event.args.items) |a| {
+                    const arg: Arg = a;
+                    try arg.genPut(writer);
+                }
+
+                try writer.print("        self.wire.finishWrite(self.id);\n", .{});
+                try writer.print("      }}\n\n", .{});
             }
-            std.debug.print("    }}\n\n", .{});
+            try writer.print("    }}\n\n", .{});
         }
     }
 
-    std.debug.print("{s}", .{part_3});
+    try writer.print("{s}", .{part_3});
 }
 
-pub fn dotToCaeml(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+pub fn dotToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     const dot_count = std.mem.count(u8, input, ".");
 
     if (dot_count == 0) {
@@ -367,14 +379,29 @@ const ArgType = union(ArgTypeTag) {
 
     pub fn zigType(arg_type: ArgType, allocator: std.mem.Allocator) ![]const u8 {
         return switch (arg_type) {
-            .int => |o| if (o.@"enum") |e| try dotToCaeml(allocator, e) else "i32",
-            .uint => |o| if (o.@"enum") |e| try dotToCaeml(allocator, e) else "u32",
+            .int => |o| if (o.@"enum") |e| try dotToCamel(allocator, e) else "i32",
+            .uint => |o| if (o.@"enum") |e| try dotToCamel(allocator, e) else "u32",
             .fd => "i32",
             .new_id => "u32",
-            .object => |o| if (o.interface) |i| try dotToCaeml(allocator, i) else "u32",
+            .object => |o| if (o.interface) |i| try dotToCamel(allocator, i) else "u32",
             .string => "[]const u8",
             .fixed => "f32",
             .array => "[]u8",
+        };
+    }
+
+    pub fn genPut(arg_type: ArgType, writer: anytype, name: []const u8) !void {
+        try writer.print("        self.wire.", .{});
+
+        return switch (arg_type) {
+            .int => |o| if (o.@"enum") |_| try writer.print("putI32(@bitCast({s}));\n", .{name}) else try writer.print("putI32({s});\n", .{name}),
+            .uint => |o| if (o.@"enum") |_| try writer.print("putU32(@bitCast({s}));\n", .{name}) else try writer.print("putU32({s});\n", .{name}),
+            .fd => try writer.print("putFd({s});\n", .{name}),
+            .new_id => try writer.print("putU32({s});\n", .{name}),
+            .object => try writer.print("putU32({s});\n", .{name}), // TODO: We can make send args typesafe
+            .string => try writer.print("putString({s});\n", .{name}),
+            .fixed => try writer.print("putFixed({s});\n", .{name}),
+            .array => try writer.print("putArray({s});\n", .{name}),
         };
     }
 
@@ -704,6 +731,10 @@ const Enum = struct {
 const Arg = struct {
     name: []const u8,
     type: ArgType,
+
+    pub fn genPut(arg: Arg, writer: anytype) !void {
+        try arg.type.genPut(writer, arg.name);
+    }
 
     pub fn format(arg: Arg, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("      arg \"{s}\" {any}", .{ arg.name, arg.type });
