@@ -35,7 +35,6 @@ pub fn main() !void {
     // const output: []const u8 = args[1];
 
     try writer.print("{s}", .{part_1});
-    try writer.print("{s}", .{part_1});
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
             try writer.print("  {s}: type = ?void,\n", .{interface.name});
@@ -59,7 +58,7 @@ pub fn main() !void {
                 try writer.print("          {} => {{\n", .{request.index});
                 for (request.args.items) |arg| {
                     // try writer.print("            const {s} = {s},\n", .{ arg.name,  });
-                    try arg.genNext(writer);
+                    try arg.genNext(arena, writer);
                 }
                 try writer.print("            return Message {{\n", .{});
                 try writer.print("              .{s} = {s}Message {{\n", .{ request.name, try snakeToCamel(arena, request.name) });
@@ -115,7 +114,7 @@ pub fn main() !void {
                 try writer.print("        try self.wire.finishWrite(self.id, {});\n", .{event.index});
                 try writer.print("      }}\n\n", .{});
             }
-            try writer.print("    }}\n\n", .{});
+            try writer.print("    }};\n\n", .{});
         }
     }
 
@@ -312,7 +311,7 @@ const part_1 =
     \\const builtin = @import("builtin");
     \\const WireFn = @import("wire.zig").Wire;
     \\
-    \\const fn Wayland(comptime ResourceMap: struct {
+    \\fn Wayland(comptime ResourceMap: struct {
     \\
 ;
 const part_2 =
@@ -440,18 +439,31 @@ const ArgType = union(ArgTypeTag) {
         };
     }
 
-    pub fn genNext(arg_type: ArgType, writer: anytype, name: []const u8) !void {
-        try writer.print("            const {s} = try self.wire.", .{name});
-
+    pub fn genNext(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8) !void {
+        try writer.print("            ", .{});
         return switch (arg_type) {
-            .int => |o| if (o.@"enum") |_| try writer.print("nextI32(@bitCast({s}));\n", .{name}) else try writer.print("nextI32({s});\n", .{name}),
-            .uint => |o| if (o.@"enum") |_| try writer.print("nextU32(@bitCast({s}));\n", .{name}) else try writer.print("nextU32({s});\n", .{name}),
-            .fd => try writer.print("nextFd({s});\n", .{name}),
-            .new_id => try writer.print("nextU32({s});\n", .{name}),
-            .object => try writer.print("nextU32({s});\n", .{name}), // TODO: We can make send args typesafe
-            .string => try writer.print("nextString({s});\n", .{name}),
-            .fixed => try writer.print("nextFixed({s});\n", .{name}),
-            .array => try writer.print("nextArray({s});\n", .{name}),
+            .int => |o| if (o.@"enum") |_| {
+                try writer.print("const {s} = try self.wire.nextI32();\n", .{name});
+            } else {
+                try writer.print("const {s} = try self.wire.nextI32();\n", .{name});
+            },
+            .uint => |o| if (o.@"enum") |_| {
+                try writer.print("const {s} = try self.wire.nextU32();\n", .{name});
+            } else {
+                try writer.print("const {s} = try self.wire.nextU32();\n", .{name});
+            },
+            .fd => try writer.print("const {s} = try self.wire.nextFd();\n", .{name}),
+            .new_id => try writer.print("const {s} = try self.wire.nextU32();\n", .{name}),
+            .object => |o| {
+                if (o.interface) |iface| {
+                    try writer.print("const {s}: {s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
+                } else {
+                    try writer.print("const {s} = try self.wire.nextU32();\n", .{name}); // TODO: We can make send args typesafe
+                }
+            },
+            .string => try writer.print("const {s} = try self.wire.nextString();\n", .{name}),
+            .fixed => try writer.print("const {s} = try self.wire.nextFixed();\n", .{name}),
+            .array => try writer.print("const {s} = try self.wire.nextArray();\n", .{name}),
         };
     }
 
@@ -592,9 +604,11 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
                         inline for (std.meta.fields(ArgType)) |union_field| {
                             if (std.mem.eql(u8, union_field.name, @tagName(std.meta.activeTag(n.type)))) {
                                 inline for (std.meta.fields(union_field.type)) |union_specific_field| {
-                                    switch (@typeInfo(union_specific_field.type)) {
-                                        .Bool => @field(@field(n.type, union_field.name), union_specific_field.name) = std.mem.eql(u8, arena_attr_value, "true"),
-                                        else => @field(@field(n.type, union_field.name), union_specific_field.name) = arena_attr_value,
+                                    if (std.mem.eql(u8, attr_name, union_specific_field.name)) {
+                                        switch (@typeInfo(union_specific_field.type)) {
+                                            .Bool => @field(@field(n.type, union_field.name), union_specific_field.name) = std.mem.eql(u8, arena_attr_value, "true"),
+                                            else => @field(@field(n.type, union_field.name), union_specific_field.name) = arena_attr_value,
+                                        }
                                     }
                                 }
                             }
@@ -801,8 +815,8 @@ const Arg = struct {
     name: []const u8,
     type: ArgType,
 
-    pub fn genNext(arg: Arg, writer: anytype) !void {
-        try arg.type.genNext(writer, arg.name);
+    pub fn genNext(arg: Arg, allocator: std.mem.Allocator, writer: anytype) !void {
+        try arg.type.genNext(allocator, writer, arg.name);
     }
 
     pub fn genPut(arg: Arg, writer: anytype) !void {
