@@ -108,7 +108,11 @@ pub fn main() !void {
             }
             try writer.print("      }};\n\n", .{});
 
-            try writer.print("      pub const Message = union(MessageType) {{\n", .{});
+            if (interface.requests.items.len > 0) {
+                try writer.print("       pub const Message = union(MessageType) {{\n", .{});
+            } else {
+                try writer.print("       const Message = struct {{\n", .{});
+            }
             for (interface.requests.items) |request| {
                 try emitDoc(writer, request.summary, request.description);
                 try writer.print("        {s}: {s}Message,\n", .{ request.name, try snakeToCamel(arena, request.name) });
