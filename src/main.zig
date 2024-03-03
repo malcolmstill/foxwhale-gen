@@ -57,6 +57,18 @@ pub fn main() !void {
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
                 try writer.print("          {} => {{\n", .{request.index});
+                for (request.args.items) |arg| {
+                    // try writer.print("            const {s} = {s},\n", .{ arg.name,  });
+                    try arg.genNext(writer);
+                }
+                try writer.print("            return Message {{\n", .{});
+                try writer.print("              .{s} = {s}Message {{\n", .{ request.name, try snakeToCamel(arena, request.name) });
+                try writer.print("                .{s} = self.*,\n", .{interface.name});
+                for (request.args.items) |arg| {
+                    try writer.print("                .{s} = {s},\n", .{ arg.name, arg.name });
+                }
+                try writer.print("              }},\n", .{});
+                try writer.print("            }};\n", .{});
                 try writer.print("          }},\n", .{});
             }
             try writer.print("          else => {{\n", .{});
@@ -428,6 +440,21 @@ const ArgType = union(ArgTypeTag) {
         };
     }
 
+    pub fn genNext(arg_type: ArgType, writer: anytype, name: []const u8) !void {
+        try writer.print("            const {s} = try self.wire.", .{name});
+
+        return switch (arg_type) {
+            .int => |o| if (o.@"enum") |_| try writer.print("nextI32(@bitCast({s}));\n", .{name}) else try writer.print("nextI32({s});\n", .{name}),
+            .uint => |o| if (o.@"enum") |_| try writer.print("nextU32(@bitCast({s}));\n", .{name}) else try writer.print("nextU32({s});\n", .{name}),
+            .fd => try writer.print("nextFd({s});\n", .{name}),
+            .new_id => try writer.print("nextU32({s});\n", .{name}),
+            .object => try writer.print("nextU32({s});\n", .{name}), // TODO: We can make send args typesafe
+            .string => try writer.print("nextString({s});\n", .{name}),
+            .fixed => try writer.print("nextFixed({s});\n", .{name}),
+            .array => try writer.print("nextArray({s});\n", .{name}),
+        };
+    }
+
     pub fn genPut(arg_type: ArgType, writer: anytype, name: []const u8) !void {
         try writer.print("        try self.wire.", .{});
 
@@ -773,6 +800,10 @@ const Enum = struct {
 const Arg = struct {
     name: []const u8,
     type: ArgType,
+
+    pub fn genNext(arg: Arg, writer: anytype) !void {
+        try arg.type.genNext(writer, arg.name);
+    }
 
     pub fn genPut(arg: Arg, writer: anytype) !void {
         try arg.type.genPut(writer, arg.name);
