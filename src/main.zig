@@ -96,6 +96,7 @@ pub fn main() !void {
                 try writer.print("          }},\n", .{});
             }
             try writer.print("          else => {{\n", .{});
+            try writer.print("            std.log.info(\"{{}}\", .{{self}});\n", .{});
             try writer.print("            return error.UnknownOpcode;\n", .{});
             try writer.print("          }},\n", .{});
             try writer.print("        }}\n", .{});
@@ -544,13 +545,13 @@ const ArgType = union(ArgTypeTag) {
 
     pub fn genMessageType(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8) !void {
         switch (arg_type) {
-            .int => |o| if (o.@"enum") |_| {
-                try writer.print("{s}: i32,\n", .{name});
+            .int => |o| if (o.@"enum") |e| {
+                try writer.print("{s}: {s},\n", .{ name, try dotToCamel(allocator, e) });
             } else {
                 try writer.print("{s}: i32,\n", .{name});
             },
-            .uint => |o| if (o.@"enum") |_| {
-                try writer.print("{s}: u32,\n", .{name});
+            .uint => |o| if (o.@"enum") |e| {
+                try writer.print("{s}: {s},\n", .{ name, try dotToCamel(allocator, e) });
             } else {
                 try writer.print("{s}: u32,\n", .{name});
             },
@@ -576,13 +577,13 @@ const ArgType = union(ArgTypeTag) {
     pub fn genNext(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8) !void {
         try writer.print("            ", .{});
         return switch (arg_type) {
-            .int => |o| if (o.@"enum") |_| {
-                try writer.print("const {s}: i32 = try self.wire.nextI32();\n", .{name});
+            .int => |o| if (o.@"enum") |e| {
+                try writer.print("const {s}: {s} = @bitCast(try self.wire.nextI32()); // bitfield\n", .{ name, try dotToCamel(allocator, e) });
             } else {
                 try writer.print("const {s}: i32 = try self.wire.nextI32();\n", .{name});
             },
-            .uint => |o| if (o.@"enum") |_| {
-                try writer.print("const {s}: u32 = try self.wire.nextU32();\n", .{name});
+            .uint => |o| if (o.@"enum") |e| {
+                try writer.print("const {s}: {s} = @bitCast(try self.wire.nextU32()); // bitfield\n", .{ name, try dotToCamel(allocator, e) });
             } else {
                 try writer.print("const {s}: u32 = try self.wire.nextU32();\n", .{name});
             },
