@@ -44,6 +44,8 @@ pub fn main() !void {
 
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
+            try writer.print("/// {s}\n", .{interface.name});
+            try emitDoc(writer, interface.summary, interface.description);
             try writer.print("    pub const {s} = struct {{\n", .{try dotToCamel(arena, interface.name)});
             try writer.print("      wire: *Wire,\n", .{});
             try writer.print("      id: u32,\n", .{});
@@ -107,14 +109,17 @@ pub fn main() !void {
 
             try writer.print("      pub const Message = union(MessageType) {{\n", .{});
             for (interface.requests.items) |request| {
+                try emitDoc(writer, request.summary, request.description);
                 try writer.print("        {s}: {s}Message,\n", .{ request.name, try snakeToCamel(arena, request.name) });
             }
             try writer.print("      }};\n\n", .{});
 
             for (interface.requests.items) |request| {
+                try emitDoc(writer, request.summary, request.description);
                 try writer.print("      const {s}Message = struct {{\n", .{try snakeToCamel(arena, request.name)});
                 try writer.print("        {s}: {s},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
                 for (request.args.items) |arg| {
+                    try writer.print("/// {s}\n", .{arg.summary});
                     try arg.genMessageType(arena, writer);
                 }
                 try writer.print("      }};\n\n", .{});
@@ -124,7 +129,7 @@ pub fn main() !void {
             // ============================================
             for (interface.events.items) |event| {
                 // FIXME: emit doc
-                try emitDoc(writer, event.description);
+                try emitDoc(writer, event.summary, event.description);
                 try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
                     try writer.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
@@ -300,6 +305,12 @@ fn processInterface(allocator: std.mem.Allocator, nodes: []Node, interface_name:
     for (nodes) |node| {
         defer index += 1;
         switch (node) {
+            .description_begin => |d| {
+                if (index == 1) {
+                    interface.summary = d.summary;
+                    interface.description = d.description;
+                }
+            },
             .enum_begin => |_| start = index,
             .enum_end => {
                 const e_begin = nodes[start].enum_begin;
@@ -338,6 +349,12 @@ fn processRequest(allocator: std.mem.Allocator, nodes: []Node, request_name: []c
     for (nodes) |node| {
         defer index += 1;
         switch (node) {
+            .description_begin => |d| {
+                if (index == 1) {
+                    request.summary = d.summary;
+                    request.description = d.description;
+                }
+            },
             .arg_begin => |a| {
                 const arg: Arg = .{ .name = a.name, .type = a.type };
                 try request.args.append(arg);
@@ -356,7 +373,12 @@ fn processEvent(allocator: std.mem.Allocator, nodes: []Node, event_name: []const
     for (nodes) |node| {
         defer index += 1;
         switch (node) {
-            .description_begin => |d| event.description = d.description,
+            .description_begin => |d| {
+                if (index == 1) {
+                    event.summary = d.summary;
+                    event.description = d.description;
+                }
+            },
             .arg_begin => |a| {
                 const arg: Arg = .{ .name = a.name, .type = a.type };
                 try event.args.append(arg);
@@ -722,7 +744,7 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
                     if (std.mem.eql(u8, attr_name, "name")) {
                         n.name = attr_value;
                     } else if (std.mem.eql(u8, attr_name, "summary")) {
-                        n.summary = attr_value;
+                        n.summary = arena_attr_value;
                     } else if (std.mem.eql(u8, attr_name, "type")) {
                         inline for (std.meta.fields(ArgType)) |union_field| {
                             if (std.mem.eql(u8, union_field.name, attr_value)) {
@@ -850,6 +872,8 @@ const Protocol = struct {
 
 const Interface = struct {
     name: []const u8,
+    summary: ?[]const u8 = null,
+    description: []const u8 = "",
     enums: std.ArrayList(Enum),
     requests: std.ArrayList(Request),
     events: std.ArrayList(Event),
@@ -879,6 +903,8 @@ const Interface = struct {
 
 const Request = struct {
     name: []const u8,
+    summary: ?[]const u8 = null,
+    description: []const u8 = "",
     index: usize,
     args: std.ArrayList(Arg),
 
@@ -900,6 +926,7 @@ const Request = struct {
 
 const Event = struct {
     name: []const u8,
+    summary: ?[]const u8 = null,
     description: []const u8 = "",
     index: usize,
     args: std.ArrayList(Arg),
@@ -962,6 +989,7 @@ const Enum = struct {
 
 const Arg = struct {
     name: []const u8,
+    summary: []const u8 = "",
     type: ArgType,
 
     pub fn genMessageType(arg: Arg, allocator: std.mem.Allocator, writer: anytype) !void {
@@ -990,7 +1018,8 @@ const Entry = struct {
     }
 };
 
-fn emitDoc(writer: anytype, doc: []const u8) !void {
+fn emitDoc(writer: anytype, summary: ?[]const u8, doc: []const u8) !void {
+    if (summary) |s| try writer.print("/// {s}\n", .{s});
     var it = std.mem.split(u8, doc, "\n");
     while (it.next()) |line| {
         try writer.print("/// {s}\n", .{std.mem.trim(u8, line, " \t")});
