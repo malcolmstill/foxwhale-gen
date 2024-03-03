@@ -421,8 +421,8 @@ const ArgType = union(ArgTypeTag) {
     uint: struct { @"enum": ?[]const u8 = null },
     fd: struct {},
     new_id: struct { interface: ?[]const u8 = null },
-    object: struct { interface: ?[]const u8 = null, allow_null: bool = false },
-    string: struct { allow_null: bool = false },
+    object: struct { interface: ?[]const u8 = null, @"allow-null": bool = false },
+    string: struct { @"allow-null": bool = false },
     fixed: struct {},
     array: struct {},
 
@@ -456,10 +456,10 @@ const ArgType = union(ArgTypeTag) {
             .new_id => try writer.print("const {s} = try self.wire.nextU32();\n", .{name}),
             .object => |o| {
                 if (o.interface) |iface| {
-                    if (o.allow_null == false) {
+                    if (o.@"allow-null" == false) {
                         try writer.print("const {s}: {s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismatchedObjectTypes, }} else return error.ExpectedObject;\n", .{ name, try snakeToCamel(allocator, iface), iface });
                     } else {
-                        try writer.print("const {s}: ?{s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
+                        try writer.print("const {s}: ?{s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismatchedObjectTypes, }} else null;\n", .{ name, try snakeToCamel(allocator, iface), iface });
                     }
                 } else {
                     try writer.print("const {s} = try self.wire.nextU32();\n", .{name}); // TODO: We can make send args typesafe
