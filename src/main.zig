@@ -99,6 +99,15 @@ pub fn main() !void {
             try writer.print("\n", .{});
             try writer.print("      const Self = @This();\n\n", .{});
 
+            try writer.print("      pub fn init(id: u32, wire: *Wire, version: u32, resource: ResourceMap.{s}) Self {{\n", .{interface.name});
+            try writer.print("        return Self{{\n", .{});
+            try writer.print("          .id = id,\n", .{});
+            try writer.print("          .wire = wire,\n", .{});
+            try writer.print("          .version = version,\n", .{});
+            try writer.print("          .resource = resource,\n", .{});
+            try writer.print("        }};\n", .{});
+            try writer.print("      }}\n", .{});
+
             // Enums
             // ============================================
             for (interface.enums.items) |@"enum"| {
@@ -111,7 +120,8 @@ pub fn main() !void {
             // Requests
             // ============================================
             try writer.print("      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
-            try writer.print("        use(self, Client, objects, field);\n", .{});
+            // try writer.print("        use(self, Client, objects, field);\n", .{});
+            try writer.print(" if (builtin.mode == .Debug and builtin.mode == .ReleaseFast) std.log.info(\"{{any}}, {{s}} {{s}}\", .{{ &objects, &field, Client }});", .{});
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
                 try writer.print("          {} => {{\n", .{request.index});
@@ -141,7 +151,7 @@ pub fn main() !void {
             }
             try writer.print("      }};\n\n", .{});
 
-            try writer.print("      const Message = union(MessageType) {{\n", .{});
+            try writer.print("      pub const Message = union(MessageType) {{\n", .{});
             for (interface.requests.items) |request| {
                 try writer.print("        {s}: {s}Message,\n", .{ request.name, try snakeToCamel(arena, request.name) });
             }
@@ -379,7 +389,7 @@ const part_1 =
     \\const builtin = @import("builtin");
     \\const WireFn = @import("wire.zig").Wire;
     \\
-    \\fn Wayland(comptime ResourceMap: struct {
+    \\pub fn Wayland(comptime ResourceMap: struct {
     \\
 ;
 const part_2 =
@@ -542,23 +552,23 @@ const ArgType = union(ArgTypeTag) {
         try writer.print("            ", .{});
         return switch (arg_type) {
             .int => |o| if (o.@"enum") |_| {
-                try writer.print("const {s} = try self.wire.nextI32();\n", .{name});
+                try writer.print("const {s}: i32 = try self.wire.nextI32();\n", .{name});
             } else {
-                try writer.print("const {s} = try self.wire.nextI32();\n", .{name});
+                try writer.print("const {s}: i32 = try self.wire.nextI32();\n", .{name});
             },
             .uint => |o| if (o.@"enum") |_| {
-                try writer.print("const {s} = try self.wire.nextU32();\n", .{name});
+                try writer.print("const {s}: u32 = try self.wire.nextU32();\n", .{name});
             } else {
-                try writer.print("const {s} = try self.wire.nextU32();\n", .{name});
+                try writer.print("const {s}: u32 = try self.wire.nextU32();\n", .{name});
             },
-            .fd => try writer.print("const {s} = try self.wire.nextFd();\n", .{name}),
-            .new_id => try writer.print("const {s} = try self.wire.nextU32();\n", .{name}),
+            .fd => try writer.print("const {s}: i32 = try self.wire.nextFd();\n", .{name}),
+            .new_id => try writer.print("const {s}: u32 = try self.wire.nextU32();\n", .{name}),
             .object => |o| {
                 if (o.interface) |iface| {
                     if (o.@"allow-null" == false) {
-                        try writer.print("const {s}: {s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismatchedObjectTypes, }} else return error.ExpectedObject;\n", .{ name, try snakeToCamel(allocator, iface), iface });
+                        try writer.print("const {s}: {s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismtachObjectTypes, }} else return error.ExpectedObject;\n", .{ name, try snakeToCamel(allocator, iface), iface });
                     } else {
-                        try writer.print("const {s}: ?{s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismatchedObjectTypes, }} else null;\n", .{ name, try snakeToCamel(allocator, iface), iface });
+                        try writer.print("const {s}: ?{s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismtachObjectTypes, }} else null;\n", .{ name, try snakeToCamel(allocator, iface), iface });
                     }
                 } else {
                     try writer.print("const {s} = try self.wire.nextU32();\n", .{name}); // TODO: We can make send args typesafe
@@ -909,7 +919,7 @@ const Enum = struct {
     pub fn emit(@"enum": Enum, allocator: std.mem.Allocator, writer: anytype) !void {
         if (@"enum".bitmap) {
             const count = @"enum".entries.items.len - 1;
-            try writer.print("      pub const {s} = packed struct(u32) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
+            try writer.print("      pub const {s} = packed struct(u32) {{ // bitfield\n", .{try snakeToCamel(allocator, @"enum".name)});
             for (@"enum".entries.items) |entry| {
                 if (entry.value == 0) continue;
                 try writer.print("        @\"{s}\": bool = false,\n", .{entry.name});
@@ -917,7 +927,7 @@ const Enum = struct {
             try writer.print("        _padding: u{} = 0,\n", .{32 - count});
             try writer.print("      }};\n\n", .{});
         } else {
-            try writer.print("      pub const {s} = enum(u8) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
+            try writer.print("      pub const {s} = enum(u32) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
             for (@"enum".entries.items) |entry| {
                 try writer.print("        @\"{s}\" = {},\n", .{ entry.name, entry.value });
             }
