@@ -124,6 +124,7 @@ pub fn main() !void {
             try writer.print(" if (builtin.mode == .Debug and builtin.mode == .ReleaseFast) std.log.info(\"{{any}}, {{s}} {{s}}\", .{{ &objects, &field, Client }});", .{});
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
+                try writer.print("          // {s}\n", .{request.name});
                 try writer.print("          {} => {{\n", .{request.index});
                 for (request.args.items) |arg| {
                     // try writer.print("            const {s} = {s},\n", .{ arg.name,  });
@@ -170,6 +171,7 @@ pub fn main() !void {
             // Events
             // ============================================
             for (interface.events.items) |event| {
+                // FIXME: emit doc
                 try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
                     try writer.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
@@ -542,7 +544,7 @@ const ArgType = union(ArgTypeTag) {
                     try writer.print("{s}: u32,\n", .{name});
                 }
             },
-            .string => try writer.print("{s}: []const u8,\n", .{name}),
+            .string => try writer.print("{s}: []u8,\n", .{name}),
             .fixed => try writer.print("{s}: f32,\n", .{name}),
             .array => try writer.print("{s}: []u8,\n", .{name}),
         }
@@ -574,7 +576,7 @@ const ArgType = union(ArgTypeTag) {
                     try writer.print("const {s} = try self.wire.nextU32();\n", .{name}); // TODO: We can make send args typesafe
                 }
             },
-            .string => try writer.print("const {s} = try self.wire.nextString();\n", .{name}),
+            .string => try writer.print("const {s}: []u8 = try self.wire.nextString();\n", .{name}),
             .fixed => try writer.print("const {s} = try self.wire.nextFixed();\n", .{name}),
             .array => try writer.print("const {s} = try self.wire.nextArray();\n", .{name}),
         };
@@ -584,8 +586,16 @@ const ArgType = union(ArgTypeTag) {
         try writer.print("        try self.wire.", .{});
 
         return switch (arg_type) {
-            .int => |o| if (o.@"enum") |_| try writer.print("putI32(@bitCast({s}));\n", .{name}) else try writer.print("putI32({s});\n", .{name}),
-            .uint => |o| if (o.@"enum") |_| try writer.print("putU32(@bitCast({s}));\n", .{name}) else try writer.print("putU32({s});\n", .{name}),
+            .int => |o| if (o.@"enum") |_| {
+                try writer.print("putI32(@intFromEnum({s})); // enum\n", .{name});
+            } else {
+                try writer.print("putI32({s});\n", .{name});
+            },
+            .uint => |o| if (o.@"enum") |_| {
+                try writer.print("putU32(@intFromEnum({s})); // enum\n", .{name});
+            } else {
+                try writer.print("putU32({s});\n", .{name});
+            },
             .fd => try writer.print("putFd({s});\n", .{name}),
             .new_id => try writer.print("putU32({s});\n", .{name}),
             .object => try writer.print("putU32({s});\n", .{name}), // TODO: We can make send args typesafe
