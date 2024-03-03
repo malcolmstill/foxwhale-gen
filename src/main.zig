@@ -53,20 +53,54 @@ pub fn main() !void {
             try writer.print("\n", .{});
             try writer.print("      const Self = @This();\n\n", .{});
 
+            try writer.print("      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
+            try writer.print("        switch(opcode) {{\n", .{});
+            for (interface.requests.items) |request| {
+                try writer.print("          {} => {{\n", .{request.index});
+                try writer.print("          }},\n", .{});
+            }
+            try writer.print("          else => {{\n", .{});
+            try writer.print("            return error.UnknownOpcode;\n", .{});
+            try writer.print("          }},\n", .{});
+            try writer.print("        }}\n", .{});
+            try writer.print("      }}\n\n", .{});
+
+            try writer.print("      const MessageType = enum(u8) {{\n", .{});
+            for (interface.requests.items) |request| {
+                try writer.print("        {s},\n", .{request.name});
+            }
+            try writer.print("      }};\n\n", .{});
+
+            try writer.print("      const Message = union(MessageType) {{\n", .{});
+            for (interface.requests.items) |request| {
+                try writer.print("        {s}: {s}Message,\n", .{ request.name, try snakeToCamel(arena, request.name) });
+            }
+            try writer.print("      }};\n\n", .{});
+
+            for (interface.requests.items) |r| {
+                const request: Request = r;
+
+                try writer.print("      const {s}Message = struct {{\n", .{try snakeToCamel(arena, request.name)});
+                for (request.args.items) |arg| {
+                    try writer.print("        {s}: {s},\n", .{ arg.name, arg.name }); // FIXME: look up types
+                }
+                try writer.print("      }};\n\n", .{});
+            }
+
             for (interface.events.items) |event| {
                 try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
                     try writer.print(", {s}: {s}", .{ arg.name, try arg.type.zigType(arena) });
                 }
                 try writer.print(") !void {{\n", .{});
-                try writer.print("        self.wire.startWrite();\n", .{});
+                try writer.print("        try self.wire.startWrite();\n", .{});
 
                 for (event.args.items) |a| {
                     const arg: Arg = a;
                     try arg.genPut(writer);
                 }
 
-                try writer.print("        self.wire.finishWrite(self.id);\n", .{});
+                try writer.print("        try self.wire.finishWrite(self.id, {});\n", .{event.index});
                 try writer.print("      }}\n\n", .{});
             }
             try writer.print("    }}\n\n", .{});
@@ -170,6 +204,8 @@ fn processInterface(allocator: std.mem.Allocator, nodes: []Node, interface_name:
     var index: usize = 0;
     var start: usize = 0;
     var name: []const u8 = "";
+    var request_number: usize = 0;
+    var event_number: usize = 0;
     for (nodes) |node| {
         defer index += 1;
         switch (node) {
@@ -184,16 +220,18 @@ fn processInterface(allocator: std.mem.Allocator, nodes: []Node, interface_name:
                 start = index;
             },
             .request_end => {
-                const request = try processRequest(allocator, nodes[start..index], name);
+                const request = try processRequest(allocator, nodes[start..index], name, request_number);
                 try interface.requests.append(request);
+                request_number += 1;
             },
             .event_begin => |e| {
                 name = e.name;
                 start = index;
             },
             .event_end => {
-                const event = try processEvent(allocator, nodes[start..index], name);
+                const event = try processEvent(allocator, nodes[start..index], name, event_number);
                 try interface.events.append(event);
+                event_number += 1;
             },
             else => continue,
         }
@@ -202,8 +240,8 @@ fn processInterface(allocator: std.mem.Allocator, nodes: []Node, interface_name:
     return interface;
 }
 
-fn processRequest(allocator: std.mem.Allocator, nodes: []Node, request_name: []const u8) !Request {
-    var request = Request.init(allocator, request_name);
+fn processRequest(allocator: std.mem.Allocator, nodes: []Node, request_name: []const u8, request_number: usize) !Request {
+    var request = Request.init(allocator, request_name, request_number);
 
     var index: usize = 0;
     for (nodes) |node| {
@@ -220,8 +258,8 @@ fn processRequest(allocator: std.mem.Allocator, nodes: []Node, request_name: []c
     return request;
 }
 
-fn processEvent(allocator: std.mem.Allocator, nodes: []Node, event_name: []const u8) !Event {
-    var event = Event.init(allocator, event_name);
+fn processEvent(allocator: std.mem.Allocator, nodes: []Node, event_name: []const u8, event_number: usize) !Event {
+    var event = Event.init(allocator, event_name, event_number);
 
     var index: usize = 0;
     for (nodes) |node| {
@@ -391,7 +429,7 @@ const ArgType = union(ArgTypeTag) {
     }
 
     pub fn genPut(arg_type: ArgType, writer: anytype, name: []const u8) !void {
-        try writer.print("        self.wire.", .{});
+        try writer.print("        try self.wire.", .{});
 
         return switch (arg_type) {
             .int => |o| if (o.@"enum") |_| try writer.print("putI32(@bitCast({s}));\n", .{name}) else try writer.print("putI32({s});\n", .{name}),
@@ -671,11 +709,13 @@ const Interface = struct {
 
 const Request = struct {
     name: []const u8,
+    index: usize,
     args: std.ArrayList(Arg),
 
-    pub fn init(allocator: std.mem.Allocator, name: []const u8) Request {
+    pub fn init(allocator: std.mem.Allocator, name: []const u8, index: usize) Request {
         return .{
             .name = name,
+            .index = index,
             .args = std.ArrayList(Arg).init(allocator),
         };
     }
@@ -690,11 +730,13 @@ const Request = struct {
 
 const Event = struct {
     name: []const u8,
+    index: usize,
     args: std.ArrayList(Arg),
 
-    pub fn init(allocator: std.mem.Allocator, name: []const u8) Event {
+    pub fn init(allocator: std.mem.Allocator, name: []const u8, index: usize) Event {
         return .{
             .name = name,
+            .index = index,
             .args = std.ArrayList(Arg).init(allocator),
         };
     }
