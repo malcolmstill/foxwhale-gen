@@ -52,6 +52,17 @@ pub fn main() !void {
             try writer.print("\n", .{});
             try writer.print("      const Self = @This();\n\n", .{});
 
+            // Enums
+            // ============================================
+            for (interface.enums.items) |@"enum"| {
+                // try writer.print("      pub const {s} = enum(u8) {{\n", .{try snakeToCamel(arena, @"enum".name)});
+                // for (@"enum".entries)
+                // try writer.print("      }};\n\n", .{});
+                try @"enum".emit(arena, writer);
+            }
+
+            // Requests
+            // ============================================
             try writer.print("      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
@@ -98,6 +109,8 @@ pub fn main() !void {
                 try writer.print("      }};\n\n", .{});
             }
 
+            // Events
+            // ============================================
             for (interface.events.items) |event| {
                 try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
@@ -805,6 +818,25 @@ const Enum = struct {
             .bitmap = bitmap,
             .entries = std.ArrayList(Entry).init(allocator),
         };
+    }
+
+    pub fn emit(@"enum": Enum, allocator: std.mem.Allocator, writer: anytype) !void {
+        if (@"enum".bitmap) {
+            const count = @"enum".entries.items.len - 1;
+            try writer.print("      pub const {s} = packed struct(u32) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
+            for (@"enum".entries.items) |entry| {
+                if (entry.value == 0) continue;
+                try writer.print("        {s}: bool = false,\n", .{entry.name});
+            }
+            try writer.print("        _padding: u{} = 0,\n", .{32 - count});
+            try writer.print("      }};\n\n", .{});
+        } else {
+            try writer.print("      pub const {s} = enum(u8) {{\n", .{try snakeToCamel(allocator, @"enum".name)});
+            for (@"enum".entries.items) |entry| {
+                try writer.print("        {s} = {},\n", .{ entry.name, entry.value });
+            }
+            try writer.print("      }};\n\n", .{});
+        }
     }
 
     pub fn format(@"enum": Enum, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
