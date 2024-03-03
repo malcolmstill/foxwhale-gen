@@ -456,8 +456,8 @@ const ArgType = union(ArgTypeTag) {
             .new_id => try writer.print("const {s} = try self.wire.nextU32();\n", .{name}),
             .object => |o| {
                 if (o.interface) |iface| {
-                    if (o.allow_null) {
-                        try writer.print("const {s}: {s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
+                    if (o.allow_null == false) {
+                        try writer.print("const {s}: {s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismatchedObjectTypes, }} else return error.ExpectedObject;\n", .{ name, try snakeToCamel(allocator, iface), iface });
                     } else {
                         try writer.print("const {s}: ?{s} = try self.wire.nextU32();\n", .{ name, try snakeToCamel(allocator, iface) });
                     }
