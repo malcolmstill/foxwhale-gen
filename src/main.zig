@@ -25,7 +25,9 @@ pub fn main() !void {
 
     try processNode(arena, &node_list, root_element);
 
-    const wayland = try processProtocols(arena, &node_list);
+    var wayland = try processProtocols(arena, &node_list);
+
+    try wayland.fixWlRegistry();
 
     // const outfile = try std.fs.cwd().createFile(output, .{});
     // defer outfile.close();
@@ -75,8 +77,7 @@ pub fn main() !void {
             // Requests
             // ============================================
             try writer.print("      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
-            // try writer.print("        use(self, Client, objects, field);\n", .{});
-            try writer.print(" if (builtin.mode == .Debug and builtin.mode == .ReleaseFast) std.log.info(\"{{any}}, {{s}} {{s}}\", .{{ &objects, &field, Client }});", .{});
+            try writer.print("        use(self, Client, objects, field);\n", .{});
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
                 try writer.print("          // {s}\n", .{request.name});
@@ -880,6 +881,21 @@ const Wayland = struct {
     pub fn format(wayland: Wayland, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         for (wayland.protocols.items) |protocol| {
             try writer.print("{any}\n", .{protocol});
+        }
+    }
+
+    pub fn fixWlRegistry(wayland: *Wayland) !void {
+        for (wayland.protocols.items) |protocol| {
+            for (protocol.interfaces.items) |interface| {
+                if (!std.mem.eql(u8, interface.name, "wl_registry")) continue;
+
+                for (interface.requests.items) |*request| {
+                    if (!std.mem.eql(u8, request.name, "bind")) continue;
+
+                    try request.args.insert(1, .{ .name = "name_string", .type = .{ .string = .{} } });
+                    try request.args.insert(2, .{ .name = "version", .type = .{ .uint = .{} } });
+                }
+            }
         }
     }
 
