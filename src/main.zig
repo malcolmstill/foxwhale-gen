@@ -432,7 +432,6 @@ const part_3 =
     \\}
     \\
 ;
-// const walyand_struct = "const fn Wayland(comptime ResourceMap: struct {{ {s} }}) type {{ return struct {{ {s} }}; }}";
 
 const NodeList = struct {
     nodes: std.ArrayList(Node),
@@ -612,7 +611,7 @@ const ArgType = union(ArgTypeTag) {
                         try writer.print("const {s}: ?{s} = if (@call(.auto, @field(Client, field), .{{objects, try self.wire.nextU32()}})) |obj| switch (obj) {{ .{s} => |o| o, else => return error.MismtachObjectTypes, }} else null;\n", .{ name, try snakeToCamel(allocator, iface), iface });
                     }
                 } else {
-                    try writer.print("const {s} = try self.wire.nextU32();\n", .{name}); // TODO: We can make send args typesafe
+                    try writer.print("const {s} = try self.wire.nextU32();\n", .{name});
                 }
             },
             .string => try writer.print("const {s}: []u8 = try self.wire.nextString();\n", .{name}),
@@ -1037,11 +1036,12 @@ const Enum = struct {
 
     pub fn emit(@"enum": Enum, allocator: std.mem.Allocator, writer: anytype) !void {
         if (@"enum".bitfield) {
-            const count = @"enum".entries.items.len - 1;
+            var count: usize = 0;
             try writer.print("      pub const {s} = packed struct(u32) {{ // bitfield\n", .{try snakeToCamel(allocator, @"enum".name)});
             for (@"enum".entries.items) |entry| {
-                if (entry.value == 0) continue;
+                if (!powerOfTwo(entry.value)) continue;
                 try writer.print("        @\"{s}\": bool = false,\n", .{entry.name});
+                count += 1;
             }
             try writer.print("        _padding: u{} = 0,\n", .{32 - count});
             try writer.print("      }};\n\n", .{});
@@ -1099,4 +1099,8 @@ fn emitDoc(writer: anytype, summary: ?[]const u8, doc: []const u8) !void {
     while (it.next()) |line| {
         try writer.print("/// {s}\n", .{std.mem.trim(u8, line, " \t")});
     }
+}
+
+fn powerOfTwo(n: usize) bool {
+    return (n != 0) and (n & (n - 1) == 0);
 }
