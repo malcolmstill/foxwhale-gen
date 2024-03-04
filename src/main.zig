@@ -90,7 +90,7 @@ pub fn main() !void {
 
             // Requests
             // ============================================
-            try writer.print("      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
+            try writer.print("\n      pub fn readMessage(self: *Self, comptime Client: type, objects: anytype, comptime field: []const u8, opcode: u16) !Message {{\n", .{});
             try writer.print("        use(self, Client, objects, field);\n", .{});
             try writer.print("        switch(opcode) {{\n", .{});
             for (interface.requests.items) |request| {
@@ -642,9 +642,9 @@ const ArgType = union(ArgTypeTag) {
                 const found_enum = wayland.findEnum(interface_name, enum_name);
 
                 if (found_enum.bitfield) {
-                    try writer.print("putI32(@bitCast({s})); // bitfield\n", .{name});
+                    try writer.print("putU32(@bitCast({s})); // bitfield\n", .{name});
                 } else {
-                    try writer.print("putI32(@intFromEnum({s})); // enum\n", .{name});
+                    try writer.print("putU32(@intFromEnum({s})); // enum\n", .{name});
                 }
             } else {
                 try writer.print("putI32({s});\n", .{name});
