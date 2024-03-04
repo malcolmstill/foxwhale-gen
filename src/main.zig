@@ -393,8 +393,8 @@ fn processEvent(allocator: std.mem.Allocator, nodes: []Node, event_name: []const
     return event;
 }
 
-fn processEnum(allocator: std.mem.Allocator, nodes: []Node, enum_name: []const u8, bitmap: bool) !Enum {
-    var @"enum" = Enum.init(allocator, enum_name, bitmap);
+fn processEnum(allocator: std.mem.Allocator, nodes: []Node, enum_name: []const u8, bitfield: bool) !Enum {
+    var @"enum" = Enum.init(allocator, enum_name, bitfield);
 
     var index: usize = 0;
     for (nodes) |node| {
@@ -582,7 +582,7 @@ const ArgType = union(ArgTypeTag) {
             .int => |o| if (o.@"enum") |enum_name| {
                 const found_enum = wayland.findEnum(current_interface_name, enum_name);
 
-                if (found_enum.bitmap) {
+                if (found_enum.bitfield) {
                     try writer.print("const {s}: {s} = @bitCast(try self.wire.nextI32()); // bitfield\n", .{ name, try dotToCamel(allocator, enum_name) });
                 } else {
                     try writer.print("const {s}: {s} = @enumFromInt(try self.wire.nextI32()); // enum\n", .{ name, try dotToCamel(allocator, enum_name) });
@@ -593,7 +593,7 @@ const ArgType = union(ArgTypeTag) {
             .uint => |o| if (o.@"enum") |enum_name| {
                 const found_enum = wayland.findEnum(current_interface_name, enum_name);
 
-                if (found_enum.bitmap) {
+                if (found_enum.bitfield) {
                     try writer.print("const {s}: {s} = @bitCast(try self.wire.nextU32()); // bitfield\n", .{ name, try dotToCamel(allocator, enum_name) });
                 } else {
                     try writer.print("const {s}: {s} = @enumFromInt(try self.wire.nextU32()); // enum\n", .{ name, try dotToCamel(allocator, enum_name) });
@@ -627,7 +627,7 @@ const ArgType = union(ArgTypeTag) {
             .int => |o| if (o.@"enum") |enum_name| {
                 const found_enum = wayland.findEnum(interface_name, enum_name);
 
-                if (found_enum.bitmap) {
+                if (found_enum.bitfield) {
                     try writer.print("putI32(@bitCast({s})); // bitfield\n", .{name});
                 } else {
                     try writer.print("putI32(@intFromEnum({s})); // enum\n", .{name});
@@ -638,7 +638,7 @@ const ArgType = union(ArgTypeTag) {
             .uint => |o| if (o.@"enum") |enum_name| {
                 const found_enum = wayland.findEnum(interface_name, enum_name);
 
-                if (found_enum.bitmap) {
+                if (found_enum.bitfield) {
                     try writer.print("putU32(@bitCast({s})); // bitfield\n", .{name});
                 } else {
                     try writer.print("putU32(@intFromEnum({s})); // enum\n", .{name});
@@ -1002,19 +1002,19 @@ const Event = struct {
 
 const Enum = struct {
     name: []const u8,
-    bitmap: bool,
+    bitfield: bool,
     entries: std.ArrayList(Entry),
 
-    pub fn init(allocator: std.mem.Allocator, name: []const u8, bitmap: bool) Enum {
+    pub fn init(allocator: std.mem.Allocator, name: []const u8, bitfield: bool) Enum {
         return .{
             .name = name,
-            .bitmap = bitmap,
+            .bitfield = bitfield,
             .entries = std.ArrayList(Entry).init(allocator),
         };
     }
 
     pub fn emit(@"enum": Enum, allocator: std.mem.Allocator, writer: anytype) !void {
-        if (@"enum".bitmap) {
+        if (@"enum".bitfield) {
             const count = @"enum".entries.items.len - 1;
             try writer.print("      pub const {s} = packed struct(u32) {{ // bitfield\n", .{try snakeToCamel(allocator, @"enum".name)});
             for (@"enum".entries.items) |entry| {
