@@ -9,32 +9,46 @@ pub fn main() !void {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    // const args = try std.process.argsAlloc(arena);
+    const args = try std.process.argsAlloc(arena);
+
+    if (!std.mem.eql(u8, args[1], "server")) unreachable;
 
     var node_list = NodeList.init(arena);
     defer node_list.deinit();
 
+    var output_file_path: ?[]const u8 = null;
+
     xml2.xmlInitParser();
     defer xml2.xmlCleanupParser();
 
-    // Parse the XML file
-    const doc = xml2.xmlReadFile("wayland.xml", null, 0) orelse return error.ReaderFailed;
-    defer xml2.xmlFreeDoc(doc);
+    var i: usize = 2;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--output-file")) {
+            output_file_path = args[i + 1];
+        }
 
-    const root_element = xml2.xmlDocGetRootElement(doc);
+        if (!std.mem.eql(u8, args[i], "--input-file")) continue;
+        i += 1;
 
-    try processNode(arena, &node_list, root_element);
+        // Parse the XML file
+        const doc = xml2.xmlReadFile(args[i], null, 0) orelse return error.ReaderFailed;
+        defer xml2.xmlFreeDoc(doc);
+
+        const root_element = xml2.xmlDocGetRootElement(doc);
+
+        try processNode(arena, &node_list, root_element);
+    }
+
+    if (node_list.nodes.items.len == 0) {
+        return error.NoInput;
+    }
 
     var wayland = try processProtocols(arena, &node_list);
 
     try wayland.fixWlRegistry();
 
-    // const outfile = try std.fs.cwd().createFile(output, .{});
-    // defer outfile.close();
-
-    var writer = std.io.getStdOut().writer();
-
-    // const output: []const u8 = args[1];
+    const outfile = if (output_file_path) |path| try std.fs.cwd().createFile(path, .{}) else std.io.getStdOut();
+    var writer = outfile.writer();
 
     try writer.print("{s}", .{part_1});
     for (wayland.protocols.items) |protocol| {
@@ -775,7 +789,7 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
             switch (latest_node.*) {
                 .arg_begin => |*n| inline for (std.meta.fields(@TypeOf(n.*))) |_| {
                     if (std.mem.eql(u8, attr_name, "name")) {
-                        n.name = attr_value;
+                        n.name = arena_attr_value;
                     } else if (std.mem.eql(u8, attr_name, "summary")) {
                         n.summary = arena_attr_value;
                     } else if (std.mem.eql(u8, attr_name, "type")) {
