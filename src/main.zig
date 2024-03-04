@@ -648,7 +648,13 @@ const ArgType = union(ArgTypeTag) {
             },
             .fd => try writer.print("putFd({s});\n", .{name}),
             .new_id => try writer.print("putU32({s});\n", .{name}),
-            .object => try writer.print("putU32({s});\n", .{name}), // TODO: We can make send args typesafe
+            .object => |o| {
+                if (o.interface) |_| {
+                    try writer.print("putU32({s}.id);\n", .{name});
+                } else {
+                    try writer.print("putU32({s});\n", .{name});
+                }
+            }, // TODO: We can make send args typesafe
             .string => try writer.print("putString({s});\n", .{name}),
             .fixed => try writer.print("putFixed({s});\n", .{name}),
             .array => try writer.print("putArray({s});\n", .{name}),
