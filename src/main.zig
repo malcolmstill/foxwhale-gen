@@ -83,7 +83,7 @@ pub fn main() !void {
                 try writer.print("          {} => {{\n", .{request.index});
                 for (request.args.items) |arg| {
                     // try writer.print("            const {s} = {s},\n", .{ arg.name,  });
-                    try arg.genNext(arena, writer);
+                    try arg.genNext(arena, writer, interface.name, &wayland);
                 }
                 try writer.print("            return Message {{\n", .{});
                 try writer.print("              .{s} = {s}Message {{\n", .{ request.name, try snakeToCamel(arena, request.name) });
@@ -133,7 +133,6 @@ pub fn main() !void {
             // Events
             // ============================================
             for (interface.events.items) |event| {
-                // FIXME: emit doc
                 try emitDoc(writer, event.summary, event.description);
                 try writer.print("      pub fn send{s}(self: Self", .{try dotToCamel(arena, event.name)});
                 for (event.args.items) |arg| {
@@ -142,9 +141,8 @@ pub fn main() !void {
                 try writer.print(") !void {{\n", .{});
                 try writer.print("        try self.wire.startWrite();\n", .{});
 
-                for (event.args.items) |a| {
-                    const arg: Arg = a;
-                    try arg.genPut(writer);
+                for (event.args.items) |arg| {
+                    try arg.genPut(writer, interface.name, &wayland);
                 }
 
                 try writer.print("        try self.wire.finishWrite(self.id, {});\n", .{event.index});
@@ -182,7 +180,7 @@ pub fn main() !void {
     try writer.print("return switch (self.*) {{\n", .{});
     for (wayland.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
-            try writer.print(".{s} => |*o| WlMessage {{ .{s} = try o.readMessage(Client, objects, field, opcode) }},\n", .{ interface.name, try snakeToCamel(arena, interface.name) });
+            try writer.print(".{s} => |*o| WlMessage {{ .{s} = try o.readMessage(Client, objects, field, opcode) }},\n", .{ interface.name, interface.name });
         }
     }
     try writer.print("}};\n\n", .{});
@@ -578,16 +576,28 @@ const ArgType = union(ArgTypeTag) {
         }
     }
 
-    pub fn genNext(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8) !void {
+    pub fn genNext(arg_type: ArgType, allocator: std.mem.Allocator, writer: anytype, name: []const u8, current_interface_name: []const u8, wayland: *const Wayland) !void {
         try writer.print("            ", .{});
         return switch (arg_type) {
-            .int => |o| if (o.@"enum") |e| {
-                try writer.print("const {s}: {s} = @bitCast(try self.wire.nextI32()); // bitfield\n", .{ name, try dotToCamel(allocator, e) });
+            .int => |o| if (o.@"enum") |enum_name| {
+                const found_enum = wayland.findEnum(current_interface_name, enum_name);
+
+                if (found_enum.bitmap) {
+                    try writer.print("const {s}: {s} = @bitCast(try self.wire.nextI32()); // bitfield\n", .{ name, try dotToCamel(allocator, enum_name) });
+                } else {
+                    try writer.print("const {s}: {s} = @enumFromInt(try self.wire.nextI32()); // enum\n", .{ name, try dotToCamel(allocator, enum_name) });
+                }
             } else {
                 try writer.print("const {s}: i32 = try self.wire.nextI32();\n", .{name});
             },
-            .uint => |o| if (o.@"enum") |e| {
-                try writer.print("const {s}: {s} = @bitCast(try self.wire.nextU32()); // bitfield\n", .{ name, try dotToCamel(allocator, e) });
+            .uint => |o| if (o.@"enum") |enum_name| {
+                const found_enum = wayland.findEnum(current_interface_name, enum_name);
+
+                if (found_enum.bitmap) {
+                    try writer.print("const {s}: {s} = @bitCast(try self.wire.nextU32()); // bitfield\n", .{ name, try dotToCamel(allocator, enum_name) });
+                } else {
+                    try writer.print("const {s}: {s} = @enumFromInt(try self.wire.nextU32()); // enum\n", .{ name, try dotToCamel(allocator, enum_name) });
+                }
             } else {
                 try writer.print("const {s}: u32 = try self.wire.nextU32();\n", .{name});
             },
@@ -610,17 +620,29 @@ const ArgType = union(ArgTypeTag) {
         };
     }
 
-    pub fn genPut(arg_type: ArgType, writer: anytype, name: []const u8) !void {
+    pub fn genPut(arg_type: ArgType, writer: anytype, name: []const u8, interface_name: []const u8, wayland: *const Wayland) !void {
         try writer.print("        try self.wire.", .{});
 
         return switch (arg_type) {
-            .int => |o| if (o.@"enum") |_| {
-                try writer.print("putI32(@intFromEnum({s})); // enum\n", .{name});
+            .int => |o| if (o.@"enum") |enum_name| {
+                const found_enum = wayland.findEnum(interface_name, enum_name);
+
+                if (found_enum.bitmap) {
+                    try writer.print("putI32(@bitCast({s})); // bitfield\n", .{name});
+                } else {
+                    try writer.print("putI32(@intFromEnum({s})); // enum\n", .{name});
+                }
             } else {
                 try writer.print("putI32({s});\n", .{name});
             },
-            .uint => |o| if (o.@"enum") |_| {
-                try writer.print("putU32(@intFromEnum({s})); // enum\n", .{name});
+            .uint => |o| if (o.@"enum") |enum_name| {
+                const found_enum = wayland.findEnum(interface_name, enum_name);
+
+                if (found_enum.bitmap) {
+                    try writer.print("putU32(@bitCast({s})); // bitfield\n", .{name});
+                } else {
+                    try writer.print("putU32(@intFromEnum({s})); // enum\n", .{name});
+                }
             } else {
                 try writer.print("putU32({s});\n", .{name});
             },
@@ -854,6 +876,32 @@ const Wayland = struct {
             try writer.print("{any}\n", .{protocol});
         }
     }
+
+    pub fn findEnum(wayland: *const Wayland, current_interface_name: []const u8, enum_or_scoped_enum_name: []const u8) Enum {
+        var interface_name = current_interface_name;
+        var enum_name = enum_or_scoped_enum_name;
+
+        if (std.mem.count(u8, enum_or_scoped_enum_name, ".") == 1) {
+            var it = std.mem.split(u8, enum_or_scoped_enum_name, ".");
+
+            interface_name = it.next() orelse unreachable;
+            enum_name = it.next() orelse unreachable;
+        }
+
+        for (wayland.protocols.items) |protocol| {
+            for (protocol.interfaces.items) |interface| {
+                if (!std.mem.eql(u8, interface.name, interface_name)) continue;
+
+                for (interface.enums.items) |@"enum"| {
+                    if (!std.mem.eql(u8, @"enum".name, enum_name)) continue;
+
+                    return @"enum";
+                }
+            }
+        }
+
+        unreachable;
+    }
 };
 
 const Protocol = struct {
@@ -1001,12 +1049,12 @@ const Arg = struct {
         try arg.type.genMessageType(allocator, writer, arg.name);
     }
 
-    pub fn genNext(arg: Arg, allocator: std.mem.Allocator, writer: anytype) !void {
-        try arg.type.genNext(allocator, writer, arg.name);
+    pub fn genNext(arg: Arg, allocator: std.mem.Allocator, writer: anytype, current_interface_name: []const u8, wayland: *const Wayland) !void {
+        try arg.type.genNext(allocator, writer, arg.name, current_interface_name, wayland);
     }
 
-    pub fn genPut(arg: Arg, writer: anytype) !void {
-        try arg.type.genPut(writer, arg.name);
+    pub fn genPut(arg: Arg, writer: anytype, interface_name: []const u8, wayland: *const Wayland) !void {
+        try arg.type.genPut(writer, arg.name, interface_name, wayland);
     }
 
     pub fn format(arg: Arg, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
