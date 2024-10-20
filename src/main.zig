@@ -230,7 +230,7 @@ pub fn dotToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     if (dot_count == 0) {
         return try snakeToCamel(allocator, input);
     } else if (dot_count == 1) {
-        var it = std.mem.split(u8, input, ".");
+        var it = std.mem.splitSequence(u8, input, ".");
         const first = try snakeToCamel(allocator, it.next() orelse unreachable);
         const second = try snakeToCamel(allocator, it.next() orelse unreachable);
 
@@ -241,7 +241,7 @@ pub fn dotToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
 }
 
 pub fn snakeToCamel(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
-    var it = std.mem.split(u8, input, "_");
+    var it = std.mem.splitSequence(u8, input, "_");
 
     var underscore_count: usize = 0;
     for (input) |c| {
@@ -804,7 +804,7 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
                                 inline for (std.meta.fields(union_field.type)) |union_specific_field| {
                                     if (std.mem.eql(u8, attr_name, union_specific_field.name)) {
                                         switch (@typeInfo(union_specific_field.type)) {
-                                            .Bool => @field(@field(n.type, union_field.name), union_specific_field.name) = std.mem.eql(u8, arena_attr_value, "true"),
+                                            .bool => @field(@field(n.type, union_field.name), union_specific_field.name) = std.mem.eql(u8, arena_attr_value, "true"),
                                             else => @field(@field(n.type, union_field.name), union_specific_field.name) = arena_attr_value,
                                         }
                                     }
@@ -816,11 +816,11 @@ fn processNode(allocator: std.mem.Allocator, node_list: *NodeList, maybe_parent_
                 inline else => |*n| inline for (std.meta.fields(@TypeOf(n.*))) |field| {
                     if (std.mem.eql(u8, field.name, attr_name)) {
                         switch (@typeInfo(field.type)) {
-                            .Int => @field(n, field.name) = if (std.mem.startsWith(u8, arena_attr_value, "0x"))
+                            .int => @field(n, field.name) = if (std.mem.startsWith(u8, arena_attr_value, "0x"))
                                 try std.fmt.parseInt(u32, arena_attr_value[2..], 16)
                             else
                                 try std.fmt.parseInt(u32, arena_attr_value, 10),
-                            .Bool => @field(n, field.name) = std.mem.eql(u8, arena_attr_value, "true"),
+                            .bool => @field(n, field.name) = std.mem.eql(u8, arena_attr_value, "true"),
                             else => @field(n, field.name) = arena_attr_value,
                         }
                     }
@@ -917,7 +917,7 @@ const Wayland = struct {
         var enum_name = enum_or_scoped_enum_name;
 
         if (std.mem.count(u8, enum_or_scoped_enum_name, ".") == 1) {
-            var it = std.mem.split(u8, enum_or_scoped_enum_name, ".");
+            var it = std.mem.splitSequence(u8, enum_or_scoped_enum_name, ".");
 
             interface_name = it.next() orelse unreachable;
             enum_name = it.next() orelse unreachable;
@@ -1109,7 +1109,7 @@ const Entry = struct {
 
 fn emitDoc(writer: anytype, summary: ?[]const u8, doc: []const u8) !void {
     if (summary) |s| try writer.print("/// {s}\n", .{s});
-    var it = std.mem.split(u8, doc, "\n");
+    var it = std.mem.splitSequence(u8, doc, "\n");
     while (it.next()) |line| {
         try writer.print("/// {s}\n", .{std.mem.trim(u8, line, " \t")});
     }
